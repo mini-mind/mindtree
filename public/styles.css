@@ -1,0 +1,328 @@
+:root {
+  color-scheme: light;
+  --bg: #f3f1eb;
+  --bg-panel: rgba(255, 252, 247, 0.94);
+  --bg-soft: rgba(33, 37, 41, 0.03);
+  --line: rgba(33, 37, 41, 0.10);
+  --line-strong: rgba(33, 37, 41, 0.18);
+  --text: #181c20;
+  --muted: #6b737c;
+  --accent: #181c20;
+  --danger: #c85a5a;
+  --shadow: 0 14px 40px rgba(42, 48, 56, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: "IBM Plex Sans", sans-serif;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 30%),
+    var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#tree-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.composer,
+.config-head {
+  backdrop-filter: blur(10px);
+}
+
+.floating-shell {
+  position: absolute;
+  inset: 20px 20px auto 20px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.brand-chip {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.composer,
+.config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.composer {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  width: min(760px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+
+.composer.is-hidden {
+  display: none;
+}
+
+.composer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.composer-head span,
+.section-title {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.composer-head strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+}
+
+.composer-head p {
+  margin: 0;
+  max-width: 48%;
+  line-height: 1.5;
+  color: var(--text);
+  text-align: right;
+}
+
+.composer-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dynamic-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.config-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.field span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text);
+  padding: 11px 12px;
+  outline: none;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  border-color: var(--line-strong);
+  background: #ffffff;
+}
+
+.field.compact input {
+  max-width: 92px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.floating-button {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  padding: 12px 16px;
+}
+
+.primary-button {
+  background: #f3f5f7;
+  color: #111317;
+  border-color: #f3f5f7;
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+
+.ghost-button {
+  background: transparent;
+  color: var(--text);
+}
+
+.primary-button:hover,
+.secondary-button:hover,
+.ghost-button:hover,
+.floating-button:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: var(--line-strong);
+}
+
+.primary-button:hover {
+  background: #ffffff;
+  color: #111317;
+  border-color: #ffffff;
+}
+
+.status {
+  min-height: 20px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.floating-button {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+
+.config-dialog {
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0;
+  background: transparent;
+}
+
+.config-dialog::backdrop {
+  background: rgba(82, 87, 94, 0.18);
+  backdrop-filter: blur(3px);
+}
+
+.config-card {
+  gap: 16px;
+  padding: 0 18px 18px;
+  background: #fffdf9;
+}
+
+@media (max-width: 820px) {
+  .floating-shell {
+    inset: 16px 16px auto 16px;
+  }
+
+  .composer {
+    left: 50%;
+    bottom: 16px;
+    width: calc(100vw - 24px);
+  }
+
+  .composer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions,
+  .composer-actions {
+    flex-direction: column;
+  }
+
+  .composer-head {
+    flex-direction: column;
+  }
+
+  .composer-head p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .field.compact input {
+    max-width: 100%;
+  }
+}

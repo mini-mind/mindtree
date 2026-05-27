@@ -1,0 +1,22 @@
+{
+  "name": "mindtree",
+  "version": "1.0.0",
+  "description": "Reasoning tree canvas with LLM expansion",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "test": "node --test test/server.test.js test/ui.test.js",
+    "test:live": "node --test test/siliconflow.smoke.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.43.1"
+  }
+}

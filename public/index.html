@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MindTree</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <canvas id="tree-canvas"></canvas>
+
+      <div class="floating-shell">
+        <div class="brand-chip">
+          <div>
+            <p class="eyebrow">Reasoning Tree</p>
+            <h1>MindTree</h1>
+          </div>
+        </div>
+
+        <button id="floating-config" class="floating-button" aria-label="Open config">
+          <span aria-hidden="true">⚙</span>
+        </button>
+      </div>
+
+      <div id="composer" class="composer">
+        <div class="composer-head">
+          <div>
+            <span>当前节点</span>
+            <strong id="selected-title">根问题</strong>
+          </div>
+          <p id="chain-summary-text">根问题</p>
+        </div>
+
+        <div class="composer-grid">
+          <input id="node-title" type="text" maxlength="80" placeholder="节点标题" />
+          <textarea
+            id="node-detail"
+            rows="4"
+            maxlength="800"
+            placeholder="推理内容，或对当前节点的补充说明"
+          ></textarea>
+        </div>
+
+        <div class="composer-actions">
+          <label class="field compact">
+            <span>生成数量</span>
+            <input id="branch-count" type="number" min="1" max="6" value="3" />
+          </label>
+          <button id="save-node" class="secondary-button">保存</button>
+          <button id="add-child" class="secondary-button">新增分支</button>
+          <button id="expand-node" class="primary-button">继续推演</button>
+        </div>
+
+        <p id="status" class="status">右键拖动画布，滚轮缩放，单击节点选中，双击节点详细编辑。</p>
+      </div>
+    </div>
+
+    <dialog id="config-dialog" class="config-dialog">
+      <form method="dialog" class="config-card">
+        <div class="config-head">
+          <div>
+            <p class="eyebrow">LLM Connection</p>
+            <h2>Agent 配置</h2>
+          </div>
+          <button value="cancel" class="ghost-button">关闭</button>
+        </div>
+
+        <div class="config-section">
+          <p class="section-title">Generator Agent</p>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input id="cfg-base-url" type="text" placeholder="https://api.siliconflow.cn/v1" />
+          </label>
+
+          <label class="field">
+            <span>API Key</span>
+            <input id="cfg-api-key" type="password" placeholder="sk-..." />
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <select id="cfg-model-select"></select>
+          </label>
+
+          <label id="cfg-model-custom-field" class="field">
+            <span>Custom Model</span>
+            <input id="cfg-model" type="text" placeholder="deepseek-ai/DeepSeek-V3.2" />
+          </label>
+        </div>
+
+        <div class="config-section">
+          <p class="section-title">Oracle Agent</p>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input
+              id="cfg-oracle-base-url"
+              type="text"
+              placeholder="默认与 Generator Agent 一致"
+            />
+          </label>
+
+          <label class="field">
+            <span>API Key</span>
+            <input id="cfg-oracle-api-key" type="password" placeholder="默认与 Generator Agent 一致" />
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <input id="cfg-oracle-model" type="text" placeholder="默认与 Generator Agent 一致" />
+          </label>
+        </div>
+
+        <div class="config-section">
+          <p class="section-title">推演参数</p>
+
+          <label class="field">
+            <span>Candidate Multiplier</span>
+            <input id="cfg-candidate-multiplier" type="number" min="1" max="6" value="3" />
+          </label>
+        </div>
+
+        <div id="model-options" class="dynamic-fields"></div>
+
+        <div class="actions">
+          <button id="save-config" value="default" class="primary-button">保存配置</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="node-dialog" class="config-dialog">
+      <form method="dialog" class="config-card">
+        <div class="config-head">
+          <div>
+            <p class="eyebrow">Node Editor</p>
+            <h2 id="node-dialog-title">节点编辑</h2>
+          </div>
+          <button value="cancel" class="ghost-button">关闭</button>
+        </div>
+
+        <label class="field">
+          <span>标题</span>
+          <input id="node-dialog-input-title" type="text" maxlength="80" />
+        </label>
+
+        <label class="field">
+          <span>推理内容</span>
+          <textarea id="node-dialog-input-detail" rows="8" maxlength="800"></textarea>
+        </label>
+
+        <div class="actions">
+          <button id="node-dialog-save" value="default" class="primary-button">保存节点</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>
