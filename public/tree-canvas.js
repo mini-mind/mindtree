@@ -233,10 +233,15 @@ export function createTreeCanvas(
     gradient.addColorStop(1, selected ? "rgba(242, 235, 223, 1)" : "rgba(248, 244, 237, 0.98)");
 
     roundRect(ctx, topLeft.x, topLeft.y, width, height, radius);
+    ctx.shadowColor = selected ? "rgba(122, 103, 76, 0.18)" : "rgba(48, 54, 61, 0.08)";
+    ctx.shadowBlur = selected ? 18 : 12;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = selected ? 8 : 6;
     ctx.fillStyle = gradient;
     ctx.fill();
+    ctx.shadowColor = "transparent";
     ctx.lineWidth = selected ? 2 : 1;
-    ctx.strokeStyle = selected ? "rgba(124, 98, 61, 0.55)" : "rgba(60, 67, 74, 0.12)";
+    ctx.strokeStyle = selected ? "rgba(124, 98, 61, 0.42)" : "rgba(72, 78, 84, 0.14)";
     ctx.stroke();
 
     roundRect(ctx, topLeft.x, topLeft.y, width, height, radius);
