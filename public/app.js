@@ -18,7 +18,7 @@ import {
   buildInitialConfig,
   createLlmConfigController,
 } from "./llm-config-ui.js";
-import { createTreeCanvas } from "./tree-canvas.js";
+import { createTreeCanvas, TREE_CANVAS_THEME } from "./tree-canvas.js";
 
 const AGENT_DEFINITIONS = [
   { key: "generator", label: "推演 Agent" },
@@ -152,12 +152,6 @@ function clampToViewport(element, position, margin = 12) {
   element.hidden = previousHidden;
 }
 
-function getRootNodeOffsetAtScreenPosition(position) {
-  const x = position.x - window.innerWidth * 0.42;
-  const y = position.y - 120;
-  return { x, y };
-}
-
 function createNodeNearParent(parentNode, index = 0, total = 1) {
   const angleStart = -0.52;
   const angleEnd = 0.78;
@@ -173,6 +167,14 @@ function createNodeNearParent(parentNode, index = 0, total = 1) {
     (parentNode.offsetX || 0) + Math.cos(angle) * radius + jitterX,
     (parentNode.offsetY || 0) + Math.sin(angle) * radius + jitterY
   );
+}
+
+function getRootNodeOffsetAtScreenPosition(position) {
+  const point = treeCanvas.projectScreenToWorld(position.x, position.y);
+  return {
+    x: point.x - TREE_CANVAS_THEME.nodeWidth / 2,
+    y: point.y - TREE_CANVAS_THEME.nodeMinHeight / 2,
+  };
 }
 
 const treeCanvas = createTreeCanvas(canvas, {
@@ -651,5 +653,8 @@ window.__mindtreeTestApi = {
   },
   getTree() {
     return JSON.parse(JSON.stringify(forest));
+  },
+  getNodeScreenBox(id) {
+    return treeCanvas.getNodeScreenBox(id);
   },
 };

@@ -5,6 +5,13 @@ export const TREE_CANVAS_THEME = {
   nodeMinHeight: 88,
 };
 
+const MINIMAP_THEME = {
+  width: 196,
+  height: 132,
+  margin: 20,
+  padding: 12,
+};
+
 function roundRect(context, x, y, width, height, radius) {
   context.beginPath();
   context.moveTo(x + radius, y);
@@ -132,6 +139,54 @@ export function createTreeCanvas(
     });
 
     return layout;
+  }
+
+  function getLayoutBounds(layout) {
+    const boxes = [...layout.values()];
+    if (!boxes.length) {
+      return null;
+    }
+
+    return boxes.reduce(
+      (bounds, box) => ({
+        minX: Math.min(bounds.minX, box.x),
+        minY: Math.min(bounds.minY, box.y),
+        maxX: Math.max(bounds.maxX, box.x + box.width),
+        maxY: Math.max(bounds.maxY, box.y + box.height),
+      }),
+      {
+        minX: boxes[0].x,
+        minY: boxes[0].y,
+        maxX: boxes[0].x + boxes[0].width,
+        maxY: boxes[0].y + boxes[0].height,
+      }
+    );
+  }
+
+  function getViewportBounds(width, height) {
+    return {
+      minX: (0 - view.offsetX) / view.scale,
+      minY: (0 - view.offsetY) / view.scale,
+      maxX: (width - view.offsetX) / view.scale,
+      maxY: (height - view.offsetY) / view.scale,
+    };
+  }
+
+  function mergeBounds(boundsList) {
+    const filtered = boundsList.filter(Boolean);
+    if (!filtered.length) {
+      return null;
+    }
+
+    return filtered.reduce(
+      (merged, bounds) => ({
+        minX: Math.min(merged.minX, bounds.minX),
+        minY: Math.min(merged.minY, bounds.minY),
+        maxX: Math.max(merged.maxX, bounds.maxX),
+        maxY: Math.max(merged.maxY, bounds.maxY),
+      }),
+      { ...filtered[0] }
+    );
   }
 
   function drawGrid(width, height) {
@@ -288,6 +343,70 @@ export function createTreeCanvas(
     ctx.restore();
   }
 
+  function drawMinimap(layout, contentBounds, width, height) {
+    const viewportBounds = getViewportBounds(width, height);
+    const bounds = mergeBounds([contentBounds, viewportBounds]);
+    if (!bounds) {
+      return;
+    }
+
+    const cardWidth = MINIMAP_THEME.width;
+    const cardHeight = MINIMAP_THEME.height;
+    const cardX = width - cardWidth - MINIMAP_THEME.margin;
+    const cardY = height - cardHeight - MINIMAP_THEME.margin;
+    const contentX = cardX + MINIMAP_THEME.padding;
+    const contentY = cardY + MINIMAP_THEME.padding;
+    const contentWidth = cardWidth - MINIMAP_THEME.padding * 2;
+    const contentHeight = cardHeight - MINIMAP_THEME.padding * 2;
+    const boundsWidth = Math.max(1, bounds.maxX - bounds.minX);
+    const boundsHeight = Math.max(1, bounds.maxY - bounds.minY);
+    const scale = Math.min(contentWidth / boundsWidth, contentHeight / boundsHeight);
+    const mapWidth = boundsWidth * scale;
+    const mapHeight = boundsHeight * scale;
+    const offsetX = contentX + (contentWidth - mapWidth) / 2;
+    const offsetY = contentY + (contentHeight - mapHeight) / 2;
+
+    ctx.save();
+    ctx.shadowColor = "rgba(41, 48, 56, 0.08)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 10;
+    roundRect(ctx, cardX, cardY, cardWidth, cardHeight, 18);
+    ctx.fillStyle = "rgba(255, 252, 247, 0.92)";
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(72, 78, 84, 0.12)";
+    ctx.stroke();
+
+    roundRect(ctx, contentX, contentY, contentWidth, contentHeight, 12);
+    ctx.clip();
+
+    layout.forEach((box, nodeId) => {
+      const x = offsetX + (box.x - bounds.minX) * scale;
+      const y = offsetY + (box.y - bounds.minY) * scale;
+      const nodeWidth = Math.max(6, box.width * scale);
+      const nodeHeight = Math.max(4, box.height * scale);
+      const selected = nodeId === currentSelectedId || currentSelectedIds.includes(nodeId);
+
+      ctx.fillStyle = selected ? "rgba(175, 133, 66, 0.9)" : "rgba(126, 136, 145, 0.5)";
+      roundRect(ctx, x, y, nodeWidth, nodeHeight, 4);
+      ctx.fill();
+    });
+
+    const viewportX = offsetX + (viewportBounds.minX - bounds.minX) * scale;
+    const viewportY = offsetY + (viewportBounds.minY - bounds.minY) * scale;
+    const viewportWidth = (viewportBounds.maxX - viewportBounds.minX) * scale;
+    const viewportHeight = (viewportBounds.maxY - viewportBounds.minY) * scale;
+
+    ctx.fillStyle = "rgba(166, 123, 53, 0.08)";
+    ctx.strokeStyle = "rgba(166, 123, 53, 0.42)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(viewportX, viewportY, viewportWidth, viewportHeight);
+    ctx.strokeRect(viewportX, viewportY, viewportWidth, viewportHeight);
+    ctx.restore();
+  }
+
   function draw() {
     const width = window.innerWidth;
     const height = window.innerHeight;
@@ -300,6 +419,7 @@ export function createTreeCanvas(
     }
 
     const layout = layoutForest(currentForest);
+    const bounds = getLayoutBounds(layout);
 
     walkForest(currentForest, (node) => {
       const box = layout.get(node.id);
@@ -319,6 +439,8 @@ export function createTreeCanvas(
     if (pointerState.selectionBox) {
       drawSelectionBox(pointerState.selectionBox);
     }
+
+    drawMinimap(layout, bounds, width, height);
   }
 
   function tick() {
@@ -519,6 +641,13 @@ export function createTreeCanvas(
       currentSelectedId = selectedId;
       currentSelectedIds = selectedIds;
       draw();
+    },
+    getNodeScreenBox(nodeId) {
+      const region = hitRegions.find((item) => item.id === nodeId);
+      return region ? { ...region } : null;
+    },
+    projectScreenToWorld(x, y) {
+      return screenToWorld(x, y);
     },
   };
 }

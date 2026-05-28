@@ -339,3 +339,77 @@ test("UI places derived nodes near their source without moving existing nodes", 
     server.close();
   }
 });
+
+test("UI keeps existing node screen position stable after adding a root node", async () => {
+  const app = createApp({
+    fetchImpl: async () => createJsonResponse(200, { choices: [] }),
+  });
+  const server = app.listen(0);
+  await once(server, "listening");
+  const { port } = server.address();
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: "new",
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "networkidle0" });
+
+    const beforeBox = await page.evaluate(() => window.__mindtreeTestApi.getNodeScreenBox(1));
+    await page.mouse.click(520, 420, { button: "right" });
+    await page.waitForSelector("#canvas-context-menu:not([hidden])");
+    await page.$eval("#context-add-root-node", (button) => button.click());
+    await page.waitForSelector("#canvas-context-menu[hidden]");
+    const afterBox = await page.evaluate(() => window.__mindtreeTestApi.getNodeScreenBox(1));
+
+    assert.ok(beforeBox);
+    assert.ok(afterBox);
+    assert.equal(afterBox.x, beforeBox.x);
+    assert.equal(afterBox.y, beforeBox.y);
+    assert.equal(afterBox.width, beforeBox.width);
+    assert.equal(afterBox.height, beforeBox.height);
+  } finally {
+    await browser.close();
+    server.close();
+  }
+});
+
+test("UI places a new root node near the canvas context-click position", async () => {
+  const app = createApp({
+    fetchImpl: async () => createJsonResponse(200, { choices: [] }),
+  });
+  const server = app.listen(0);
+  await once(server, "listening");
+  const { port } = server.address();
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: "new",
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "networkidle0" });
+
+    const clickPoint = { x: 520, y: 420 };
+    await page.mouse.click(clickPoint.x, clickPoint.y, { button: "right" });
+    await page.waitForSelector("#canvas-context-menu:not([hidden])");
+    await page.$eval("#context-add-root-node", (button) => button.click());
+    await page.waitForSelector("#canvas-context-menu[hidden]");
+
+    const newNodeBox = await page.evaluate(() => window.__mindtreeTestApi.getNodeScreenBox(2));
+    assert.ok(newNodeBox);
+
+    const centerX = newNodeBox.x + newNodeBox.width / 2;
+    const centerY = newNodeBox.y + newNodeBox.height / 2;
+    assert.ok(Math.abs(centerX - clickPoint.x) <= 8, `${centerX} vs ${clickPoint.x}`);
+    assert.ok(Math.abs(centerY - clickPoint.y) <= 8, `${centerY} vs ${clickPoint.y}`);
+  } finally {
+    await browser.close();
+    server.close();
+  }
+});
