@@ -6,26 +6,31 @@ import {
   saveTree,
 } from "./config-store.js";
 import {
-  getModelCapabilities,
-  getModelOptionDefaults,
-  normalizeOptionValue,
-} from "./model-options.js";
-import { createInitialTree, findNode, getMaxId } from "./tree-model.js";
+  createEmptyNode,
+  createInitialForest,
+  createMessage,
+  deleteNodeFromForest,
+  findNodeInForest,
+  getMaxId,
+  normalizeForest,
+} from "./tree-model.js";
+import {
+  buildInitialConfig,
+  createLlmConfigController,
+} from "./llm-config-ui.js";
 import { createTreeCanvas } from "./tree-canvas.js";
+
+const AGENT_DEFINITIONS = [
+  { key: "generator", label: "推演 Agent" },
+  { key: "oracle", label: "卜卦 Agent" },
+];
 
 const canvas = document.getElementById("tree-canvas");
 
 const elements = {
-  selectedTitle: document.getElementById("selected-title"),
-  chainSummaryText: document.getElementById("chain-summary-text"),
-  nodeTitle: document.getElementById("node-title"),
-  nodeDetail: document.getElementById("node-detail"),
-  branchCount: document.getElementById("branch-count"),
   status: document.getElementById("status"),
-  composer: document.getElementById("composer"),
-  saveNode: document.getElementById("save-node"),
-  addChild: document.getElementById("add-child"),
-  expandNode: document.getElementById("expand-node"),
+  helpDialog: document.getElementById("help-dialog"),
+  floatingHelp: document.getElementById("floating-help"),
   floatingConfig: document.getElementById("floating-config"),
   configDialog: document.getElementById("config-dialog"),
   saveConfig: document.getElementById("save-config"),
@@ -34,150 +39,210 @@ const elements = {
   cfgModelSelect: document.getElementById("cfg-model-select"),
   cfgModelCustomField: document.getElementById("cfg-model-custom-field"),
   cfgModel: document.getElementById("cfg-model"),
-  cfgOracleBaseUrl: document.getElementById("cfg-oracle-base-url"),
-  cfgOracleApiKey: document.getElementById("cfg-oracle-api-key"),
-  cfgOracleModel: document.getElementById("cfg-oracle-model"),
   cfgCandidateMultiplier: document.getElementById("cfg-candidate-multiplier"),
   modelOptions: document.getElementById("model-options"),
+  configTabTriggerBase: document.getElementById("config-tab-trigger-base"),
+  configAgentTabs: document.getElementById("config-agent-tabs"),
+  configAgentPanels: document.getElementById("config-agent-panels"),
+  nodeContextMenu: document.getElementById("node-context-menu"),
+  contextEditNode: document.getElementById("context-edit-node"),
+  contextAddChildNode: document.getElementById("context-add-child-node"),
+  contextDeleteNode: document.getElementById("context-delete-node"),
+  canvasContextMenu: document.getElementById("canvas-context-menu"),
+  contextAddRootNode: document.getElementById("context-add-root-node"),
+  contextDeleteSelectedNodes: document.getElementById("context-delete-selected-nodes"),
   nodeDialog: document.getElementById("node-dialog"),
-  nodeDialogTitle: document.getElementById("node-dialog-title"),
-  nodeDialogInputTitle: document.getElementById("node-dialog-input-title"),
-  nodeDialogInputDetail: document.getElementById("node-dialog-input-detail"),
-  nodeDialogSave: document.getElementById("node-dialog-save"),
+  nodeDialogSummary: document.getElementById("node-dialog-summary"),
+  nodeDialogMessages: document.getElementById("node-dialog-messages"),
+  nodeDialogDirection: document.getElementById("node-dialog-direction"),
+  nodeDialogExpand: document.getElementById("node-dialog-expand"),
+  nodeDialogStatus: document.getElementById("node-dialog-status"),
 };
 
 const serverConfig = getLocalFallbackConfig();
 let modelCapabilities = {};
 let knownModels = [];
-let dynamicOptionInputs = {};
-let tree = loadTree() || createInitialTree();
-let llmConfig = buildInitialConfig(serverConfig, loadStoredConfig(), modelCapabilities);
-let nodeId = Math.max(3, getMaxId(tree) + 1);
-let selectedId = tree.id;
+let forest = normalizeForest(loadTree() || createInitialForest());
+let llmConfig = buildInitialConfig(
+  AGENT_DEFINITIONS,
+  serverConfig,
+  loadStoredConfig(),
+  modelCapabilities
+);
+let nodeId = Math.max(2, getMaxId(forest) + 1);
+const interactionState = {
+  selectedIds: forest[0]?.id == null ? [] : [forest[0].id],
+  contextMenuNodeId: null,
+  canvasContextMenuPosition: null,
+};
+
+function normalizeSelectedIds(ids = []) {
+  return [...new Set(ids.filter((id) => Number.isFinite(id)))];
+}
+
+function setSelection(nextSelectedIds = []) {
+  interactionState.selectedIds = normalizeSelectedIds(nextSelectedIds);
+}
+
+function getSelection() {
+  return {
+    selectedId: interactionState.selectedIds[0] ?? null,
+    selectedIds: [...interactionState.selectedIds],
+  };
+}
+
+function selectSingleNode(id) {
+  setSelection(id === null ? [] : [id]);
+}
+
+function clearSelection() {
+  setSelection([]);
+}
+
+function persistForest() {
+  saveTree(forest);
+}
+
+function replaceForest(nextForest) {
+  forest = nextForest;
+  persistForest();
+  syncSelection();
+}
+
+function getContextMenuNodeId() {
+  return interactionState.contextMenuNodeId;
+}
+
+function getCanvasContextPosition() {
+  return interactionState.canvasContextMenuPosition || { x: 0, y: 0 };
+}
+
+function setNodeContextTarget(nodeId) {
+  interactionState.contextMenuNodeId = nodeId;
+}
+
+function clearNodeContextTarget() {
+  interactionState.contextMenuNodeId = null;
+}
+
+function setCanvasContextPosition(position) {
+  interactionState.canvasContextMenuPosition = position;
+}
+
+function clearCanvasContextPosition() {
+  interactionState.canvasContextMenuPosition = null;
+}
+
+function clampToViewport(element, position, margin = 12) {
+  const previousHidden = element.hidden;
+  const previousVisibility = element.style.visibility;
+
+  element.hidden = false;
+  element.style.visibility = "hidden";
+  element.style.left = "0px";
+  element.style.top = "0px";
+
+  const rect = element.getBoundingClientRect();
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+
+  element.style.left = `${Math.min(Math.max(position.x, margin), maxLeft)}px`;
+  element.style.top = `${Math.min(Math.max(position.y, margin), maxTop)}px`;
+  element.style.visibility = previousVisibility;
+  element.hidden = previousHidden;
+}
+
+function getRootNodeOffsetAtScreenPosition(position) {
+  const x = position.x - window.innerWidth * 0.42;
+  const y = position.y - 120;
+  return { x, y };
+}
+
+function createNodeNearParent(parentNode, index = 0, total = 1) {
+  const angleStart = -0.52;
+  const angleEnd = 0.78;
+  const angle =
+    total === 1
+      ? 0.12
+      : angleStart + ((angleEnd - angleStart) * index) / Math.max(1, total - 1);
+  const radius = 220 + ((index % 3) * 28);
+  const jitterX = ((index % 2) * 18) - 9;
+  const jitterY = ((index % 4) * 14) - 21;
+  return createEmptyNode(
+    nodeId++,
+    (parentNode.offsetX || 0) + Math.cos(angle) * radius + jitterX,
+    (parentNode.offsetY || 0) + Math.sin(angle) * radius + jitterY
+  );
+}
 
 const treeCanvas = createTreeCanvas(canvas, {
   onNodeSelect: (id) => {
-    selectedId = id;
+    closeAllContextMenus();
+    selectSingleNode(id);
+    syncSelection();
+  },
+  onNodesSelect: (ids) => {
+    closeAllContextMenus();
+    setSelection(ids);
     syncSelection();
   },
   onNodeOpen: (id) => {
-    selectedId = id;
+    closeAllContextMenus();
+    selectSingleNode(id);
     syncSelection();
     openNodeDialog();
   },
   onBackgroundSelect: () => {
-    selectedId = null;
+    closeAllContextMenus();
+    clearSelection();
     syncSelection();
   },
   onNodeMove: (id, deltaX, deltaY) => {
-    const found = findNode(tree, id);
+    const found = findNodeInForest(forest, id);
     if (!found) {
       return;
     }
 
     found.node.offsetX = (found.node.offsetX || 0) + deltaX;
     found.node.offsetY = (found.node.offsetY || 0) + deltaY;
-    saveTree(tree);
-    if (selectedId === id) {
-      treeCanvas.render(tree, selectedId);
+    persistForest();
+    syncSelection();
+  },
+  onNodeContextMenu: (id, position) => {
+    const { selectedIds } = getSelection();
+    if (selectedIds.length > 1 && selectedIds.includes(id)) {
+      openCanvasContextMenu(position);
+      return;
     }
+    openNodeContextMenu(id, position);
+  },
+  onBackgroundContextMenu: (position) => {
+    openCanvasContextMenu(position);
   },
 });
+const llmConfigUi = createLlmConfigController({
+  agentDefinitions: AGENT_DEFINITIONS,
+  elements,
+  serverConfig,
+  getConfig: () => llmConfig,
+  setConfig: (nextConfig) => {
+    llmConfig = nextConfig;
+  },
+  getKnownModels: () => knownModels,
+  getModelCapabilitiesMap: () => modelCapabilities,
+});
 
-function buildInitialConfig(baseConfig, storedConfig, capabilities) {
-  const resolvedModel = storedConfig.model || baseConfig.model;
-  return {
-    ...baseConfig,
-    ...getModelOptionDefaults(capabilities, baseConfig.model),
-    ...storedConfig,
-    ...getModelOptionDefaults(capabilities, resolvedModel),
-  };
+function openConfig() {
+  llmConfigUi.hydrateForm();
+  elements.configDialog.showModal();
 }
 
-function renderModelSelect() {
-  const options = knownModels.length ? knownModels : [serverConfig.model];
-  const currentModel = llmConfig.model || serverConfig.model;
-  const isKnownModel = options.includes(currentModel);
-
-  elements.cfgModelSelect.innerHTML = "";
-  options.forEach((model) => {
-    const option = document.createElement("option");
-    option.value = model;
-    option.textContent = model;
-    elements.cfgModelSelect.appendChild(option);
-  });
-
-  const customOption = document.createElement("option");
-  customOption.value = "__custom__";
-  customOption.textContent = "Custom...";
-  elements.cfgModelSelect.appendChild(customOption);
-
-  elements.cfgModelSelect.value = isKnownModel ? currentModel : "__custom__";
-  elements.cfgModelCustomField.style.display = isKnownModel ? "none" : "flex";
-}
-
-function renderModelOptions(model) {
-  const capability = getModelCapabilities(modelCapabilities, model);
-  dynamicOptionInputs = {};
-  elements.modelOptions.innerHTML = "";
-
-  capability.options.forEach((option) => {
-    const wrapper = document.createElement("label");
-    wrapper.className = "field";
-
-    const label = document.createElement("span");
-    label.textContent = option.label;
-    wrapper.appendChild(label);
-
-    let input;
-    if (option.type === "boolean" || option.type === "select") {
-      input = document.createElement("select");
-      const choices =
-        option.type === "boolean"
-          ? [
-              { value: "true", label: "true" },
-              { value: "false", label: "false" },
-            ]
-          : option.choices.map((choice) => ({ value: choice, label: choice }));
-      choices.forEach((choice) => {
-        const item = document.createElement("option");
-        item.value = choice.value;
-        item.textContent = choice.label;
-        input.appendChild(item);
-      });
-      input.value = String(
-        normalizeOptionValue(option, llmConfig[option.key] ?? option.defaultValue)
-      );
-    } else {
-      input = document.createElement("input");
-      input.type = option.type;
-      if (option.min !== undefined) {
-        input.min = String(option.min);
-      }
-      if (option.step !== undefined) {
-        input.step = String(option.step);
-      }
-      input.value = String(
-        normalizeOptionValue(option, llmConfig[option.key] ?? option.defaultValue)
-      );
-    }
-
-    wrapper.appendChild(input);
-    elements.modelOptions.appendChild(wrapper);
-    dynamicOptionInputs[option.key] = { input, option };
-  });
-}
-
-function hydrateConfigForm() {
-  elements.cfgBaseUrl.value = llmConfig.baseUrl || "";
-  elements.cfgApiKey.value = llmConfig.apiKey || "";
-  elements.cfgModel.value = llmConfig.model || "";
-  renderModelSelect();
-  elements.cfgOracleBaseUrl.value = llmConfig.oracleBaseUrl || "";
-  elements.cfgOracleApiKey.value = llmConfig.oracleApiKey || "";
-  elements.cfgOracleModel.value = llmConfig.oracleModel || "";
-  elements.cfgCandidateMultiplier.value = llmConfig.candidateMultiplier || 3;
-  renderModelOptions(llmConfig.model || serverConfig.model);
+function saveConfigFromDialog() {
+  llmConfigUi.updateConfig(llmConfigUi.collectForm());
+  saveConfig(llmConfig);
+  llmConfigUi.hydrateForm();
+  elements.configDialog.close();
+  setStatus("LLM 配置已保存到本地。");
 }
 
 function setStatus(message, isError = false) {
@@ -185,57 +250,84 @@ function setStatus(message, isError = false) {
   elements.status.style.color = isError ? "var(--danger)" : "var(--muted)";
 }
 
+function setNodeDialogStatus(message, isError = false) {
+  elements.nodeDialogStatus.textContent = message;
+  elements.nodeDialogStatus.style.color = isError ? "var(--danger)" : "var(--muted)";
+}
+
+function getNodeLabel(node) {
+  return node.summary || "未命名节点";
+}
+
+function renderNodeMessages(node) {
+  elements.nodeDialogMessages.innerHTML = "";
+  node.messages.forEach((message) => {
+    const article = document.createElement("article");
+    article.className = `message-card is-${message.role}`;
+
+    const meta = document.createElement("div");
+    meta.className = "message-meta";
+    meta.textContent =
+      message.role === "user"
+        ? "推演方向"
+        : message.agent === "oracle"
+          ? "卜卦 Agent"
+          : "推演 Agent";
+    article.appendChild(meta);
+
+    const body = document.createElement("p");
+    body.className = "message-body";
+    body.textContent = message.content;
+    article.appendChild(body);
+
+    elements.nodeDialogMessages.appendChild(article);
+  });
+}
+
 function syncSelection() {
-  if (selectedId === null) {
-    elements.selectedTitle.textContent = "未选中";
-    elements.chainSummaryText.textContent = "点击任意节点开始编辑";
-    elements.nodeTitle.value = "";
-    elements.nodeDetail.value = "";
-    elements.composer.classList.add("is-hidden");
-    treeCanvas.render(tree, null);
-    return;
-  }
-
-  const found = findNode(tree, selectedId);
-  if (!found) {
-    selectedId = null;
-    return syncSelection();
-  }
-
-  elements.selectedTitle.textContent = found.node.title;
-  elements.chainSummaryText.textContent = found.path.map((node) => node.title).join(" / ");
-  elements.nodeTitle.value = found.node.title;
-  elements.nodeDetail.value = found.node.detail || "";
-  elements.composer.classList.remove("is-hidden");
-  treeCanvas.render(tree, selectedId);
+  const { selectedId, selectedIds } = getSelection();
+  treeCanvas.render(forest, selectedId, selectedIds);
 }
 
 function openNodeDialog() {
-  const found = findNode(tree, selectedId);
+  const { selectedId } = getSelection();
+  const found = findNodeInForest(forest, selectedId);
   if (!found) {
     return;
   }
 
-  elements.nodeDialogTitle.textContent = found.node.title || "节点编辑";
-  elements.nodeDialogInputTitle.value = found.node.title || "";
-  elements.nodeDialogInputDetail.value = found.node.detail || "";
+  elements.nodeDialogSummary.textContent = getNodeLabel(found.node);
+  elements.nodeDialogDirection.value = "";
+  renderNodeMessages(found.node);
+  setNodeDialogStatus("输入新的方向后，继续推演这个节点。");
   elements.nodeDialog.showModal();
 }
 
-function addChildNode(parentId, title = "新分支", detail = "补充这个方向的进一步推理。") {
-  const found = findNode(tree, parentId);
+function resetNodeDialog(foundNode) {
+  elements.nodeDialogSummary.textContent = getNodeLabel(foundNode);
+  elements.nodeDialogDirection.value = "";
+  renderNodeMessages(foundNode);
+}
+
+function appendRootNode(offsetX = 0, offsetY = 0) {
+  const node = createEmptyNode(nodeId++, offsetX, offsetY);
+  forest.push(node);
+  selectSingleNode(node.id);
+  persistForest();
+  syncSelection();
+}
+
+function appendChildNode(parentId) {
+  const found = findNodeInForest(forest, parentId);
   if (!found) {
     return;
   }
 
-  found.node.children.push({
-    id: nodeId++,
-    title,
-    detail,
-    offsetX: 0,
-    offsetY: 0,
-    children: [],
-  });
+  const node = createNodeNearParent(found.node);
+  found.node.children.push(node);
+  selectSingleNode(node.id);
+  persistForest();
+  syncSelection();
 }
 
 async function loadServerDefaults() {
@@ -252,159 +344,312 @@ async function loadServerDefaults() {
     delete serverDefaults.knownModels;
 
     Object.assign(serverConfig, serverDefaults);
-    llmConfig = buildInitialConfig(serverConfig, loadStoredConfig(), modelCapabilities);
-    hydrateConfigForm();
+    llmConfig = buildInitialConfig(
+      AGENT_DEFINITIONS,
+      serverConfig,
+      loadStoredConfig(),
+      modelCapabilities
+    );
+    llmConfigUi.hydrateForm();
   } catch {
     modelCapabilities = {};
     knownModels = [];
   }
 }
 
-async function expandWithLlm() {
-  const found = findNode(tree, selectedId);
+async function requestExpansion(found, directionText, branchCount) {
+  const response = await fetch("/api/expand", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chain: found.path.map(({ id, summary, messages }) => ({
+        id,
+        summary,
+        detail: messages
+          .map((message) => `${message.role === "user" ? "方向" : "反馈"}：${message.content}`)
+          .join("\n"),
+      })),
+      branchCount,
+      direction: directionText,
+      config: llmConfig,
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    if (Array.isArray(data.knownModels) && data.knownModels.length) {
+      knownModels = data.knownModels;
+      llmConfigUi.renderModelSelect();
+    }
+    throw new Error(data.error || "请求失败");
+  }
+
+  return data.branches || [];
+}
+
+async function expandFromNodeDialog() {
+  const { selectedId } = getSelection();
+  const found = findNodeInForest(forest, selectedId);
   if (!found) {
     return;
   }
 
   if (!llmConfig.apiKey || !llmConfig.baseUrl || !llmConfig.model) {
-    setStatus("先填写 LLM 配置。", true);
-    elements.configDialog.showModal();
+    setNodeDialogStatus("先填写 LLM 配置。", true);
+    llmConfigUi.setActiveTab("base");
+    openConfig();
     return;
   }
 
-  const branchCount = Number(elements.branchCount.value) || 3;
-  setStatus("模型推演中...");
-  elements.expandNode.disabled = true;
+  const directionText = elements.nodeDialogDirection.value.trim();
+  if (!directionText) {
+    setNodeDialogStatus("先输入这次想继续推演的方向。", true);
+    return;
+  }
+
+  elements.nodeDialogExpand.disabled = true;
+  setNodeDialogStatus("模型推演中...");
 
   try {
-    const response = await fetch("/api/expand", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chain: found.path.map(({ id, title, detail }) => ({ id, title, detail })),
-        branchCount,
-        config: llmConfig,
-      }),
-    });
+    found.node.messages.push(createMessage("user", directionText));
+    const branches = await requestExpansion(found, directionText, 3);
 
-    const data = await response.json();
-    if (!response.ok) {
-      if (Array.isArray(data.knownModels) && data.knownModels.length) {
-        knownModels = data.knownModels;
-        renderModelSelect();
-      }
-      throw new Error(data.error || "请求失败");
-    }
-
-    if (!data.branches?.length) {
+    if (!branches.length) {
       throw new Error("模型没有返回可用分支");
     }
 
-    data.branches.forEach((branch) => addChildNode(found.node.id, branch.title, branch.detail));
-    saveTree(tree);
-    treeCanvas.render(tree, selectedId);
-    setStatus(`已新增 ${data.branches.length} 个推演分支。`);
+    branches.forEach((branch, index) => {
+      const childNode = createNodeNearParent(found.node, index, branches.length);
+      childNode.messages = [
+        createMessage("user", directionText),
+        createMessage("agent", branch.detail || "", "generator"),
+      ];
+      childNode.summary = branch.summary || "";
+      found.node.children.push(childNode);
+    });
+
+    found.node.messages.push(
+      createMessage(
+        "agent",
+        `已生成 ${branches.length} 个候选分支：${branches
+          .map((branch) => branch.summary || "未命名")
+          .join(" / ")}`,
+        "oracle"
+      )
+    );
+
+    resetNodeDialog(found.node);
+    persistForest();
+    syncSelection();
+    setNodeDialogStatus(`已生成 ${branches.length} 个新的推演分支。`);
+    setStatus(`已生成 ${branches.length} 个新的推演分支。`);
   } catch (error) {
-    setStatus(error.message || "模型请求失败", true);
+    found.node.messages = found.node.messages.filter(
+      (message, index) =>
+        !(index === found.node.messages.length - 1 && message.role === "user" && message.content === directionText)
+    );
+    renderNodeMessages(found.node);
+    setNodeDialogStatus(error.message || "模型请求失败", true);
   } finally {
-    elements.expandNode.disabled = false;
+    elements.nodeDialogExpand.disabled = false;
   }
 }
 
-function openConfig() {
-  hydrateConfigForm();
-  elements.configDialog.showModal();
+function bindDialogBackdropClose(dialog) {
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) {
+      dialog.close();
+    }
+  });
 }
 
-elements.saveNode.addEventListener("click", () => {
-  const found = findNode(tree, selectedId);
+function deleteSelectedNode(targetId) {
+  const result = deleteNodeFromForest(forest, targetId);
+  if (!result.deleted) {
+    return;
+  }
+
+  setSelection(result.nodes[0] ? [result.nodes[0].id] : []);
+  replaceForest(result.nodes);
+  closeNodeContextMenu();
+  setStatus("节点已删除。");
+}
+
+function deleteSelectedNodes(targetIds) {
+  const ids = [...new Set(targetIds)].sort((left, right) => {
+    const leftDepth = findNodeInForest(forest, left)?.path.length || 0;
+    const rightDepth = findNodeInForest(forest, right)?.path.length || 0;
+    return rightDepth - leftDepth;
+  });
+  let nextForest = forest;
+  let deletedCount = 0;
+
+  ids.forEach((id) => {
+    const result = deleteNodeFromForest(nextForest, id);
+    if (result.deleted) {
+      nextForest = result.nodes;
+      deletedCount += 1;
+    }
+  });
+
+  if (!deletedCount) {
+    return;
+  }
+
+  clearSelection();
+  replaceForest(nextForest);
+  closeAllContextMenus();
+  setStatus(deletedCount === 1 ? "节点已删除。" : `已删除 ${deletedCount} 个节点。`);
+}
+
+function openNodeContextMenu(nodeId, position) {
+  const found = findNodeInForest(forest, nodeId);
   if (!found) {
     return;
   }
 
-  found.node.title = elements.nodeTitle.value.trim() || "未命名节点";
-  found.node.detail = elements.nodeDetail.value.trim();
-  saveTree(tree);
+  closeCanvasContextMenu();
+  setNodeContextTarget(nodeId);
+  selectSingleNode(nodeId);
   syncSelection();
-  setStatus("节点已保存。");
-});
+  elements.nodeContextMenu.hidden = false;
+  clampToViewport(elements.nodeContextMenu, position);
+}
 
-elements.addChild.addEventListener("click", () => {
-  addChildNode(selectedId);
-  saveTree(tree);
-  treeCanvas.render(tree, selectedId);
-  setStatus("已添加新的手动分支。");
-});
+function closeNodeContextMenu() {
+  clearNodeContextTarget();
+  elements.nodeContextMenu.hidden = true;
+}
 
-elements.expandNode.addEventListener("click", () => {
-  expandWithLlm();
-});
+function openCanvasContextMenu(position) {
+  closeNodeContextMenu();
+  const { selectedIds } = getSelection();
+  setCanvasContextPosition(position);
+  elements.contextDeleteSelectedNodes.hidden = selectedIds.length < 2;
+  elements.canvasContextMenu.hidden = false;
+  clampToViewport(elements.canvasContextMenu, position);
+}
+
+function closeCanvasContextMenu() {
+  clearCanvasContextPosition();
+  elements.canvasContextMenu.hidden = true;
+}
+
+function closeAllContextMenus() {
+  closeNodeContextMenu();
+  closeCanvasContextMenu();
+}
 
 elements.cfgModelSelect.addEventListener("change", () => {
   const isCustom = elements.cfgModelSelect.value === "__custom__";
   elements.cfgModelCustomField.style.display = isCustom ? "flex" : "none";
-  renderModelOptions(
+  llmConfigUi.renderModelOptions(
     isCustom ? elements.cfgModel.value.trim() || serverConfig.model : elements.cfgModelSelect.value
   );
 });
 
 elements.cfgModel.addEventListener("input", () => {
   if (elements.cfgModelSelect.value === "__custom__") {
-    renderModelOptions(elements.cfgModel.value.trim() || serverConfig.model);
+    llmConfigUi.renderModelOptions(elements.cfgModel.value.trim() || serverConfig.model);
   }
+});
+
+elements.configTabTriggerBase.addEventListener("click", () => {
+  llmConfigUi.setActiveTab("base");
 });
 
 elements.floatingConfig.addEventListener("click", openConfig);
+elements.floatingHelp.addEventListener("click", () => {
+  elements.helpDialog.showModal();
+});
+
+elements.contextEditNode.addEventListener("click", () => {
+  const nodeId = getContextMenuNodeId();
+  if (nodeId === null) {
+    return;
+  }
+  selectSingleNode(nodeId);
+  closeNodeContextMenu();
+  openNodeDialog();
+});
+
+elements.contextAddChildNode.addEventListener("click", () => {
+  const nodeId = getContextMenuNodeId();
+  if (nodeId === null) {
+    return;
+  }
+  appendChildNode(nodeId);
+  closeNodeContextMenu();
+  setStatus("已衍生空节点。");
+});
+
+elements.contextDeleteNode.addEventListener("click", () => {
+  const nodeId = getContextMenuNodeId();
+  if (nodeId === null) {
+    return;
+  }
+  deleteSelectedNode(nodeId);
+});
+
+elements.contextAddRootNode.addEventListener("click", () => {
+  const position = getCanvasContextPosition();
+  const offset = getRootNodeOffsetAtScreenPosition(position);
+  closeCanvasContextMenu();
+  appendRootNode(offset.x, offset.y);
+  setStatus("已新增空节点。");
+});
+
+elements.contextDeleteSelectedNodes.addEventListener("click", () => {
+  deleteSelectedNodes(getSelection().selectedIds);
+});
 
 elements.saveConfig.addEventListener("click", (event) => {
   event.preventDefault();
-  llmConfig.baseUrl = elements.cfgBaseUrl.value.trim();
-  llmConfig.apiKey = elements.cfgApiKey.value.trim();
-  llmConfig.model =
-    elements.cfgModelSelect.value === "__custom__"
-      ? elements.cfgModel.value.trim()
-      : elements.cfgModelSelect.value;
-  llmConfig.oracleBaseUrl = elements.cfgOracleBaseUrl.value.trim();
-  llmConfig.oracleApiKey = elements.cfgOracleApiKey.value.trim();
-  llmConfig.oracleModel = elements.cfgOracleModel.value.trim();
-  llmConfig.candidateMultiplier = Number(elements.cfgCandidateMultiplier.value) || 3;
-
-  const capability = getModelCapabilities(modelCapabilities, llmConfig.model);
-  Object.keys(dynamicOptionInputs).forEach((key) => {
-    const { input, option } = dynamicOptionInputs[key];
-    llmConfig[key] = normalizeOptionValue(option, input.value);
-  });
-  capability.options.forEach((option) => {
-    if (!(option.key in llmConfig)) {
-      llmConfig[option.key] = option.defaultValue;
-    }
-  });
-
-  saveConfig(llmConfig);
-  hydrateConfigForm();
-  elements.configDialog.close();
-  setStatus("LLM 配置已保存到本地。");
+  saveConfigFromDialog();
 });
 
-elements.nodeDialogSave.addEventListener("click", (event) => {
-  event.preventDefault();
-  const found = findNode(tree, selectedId);
-  if (!found) {
-    return;
-  }
-
-  found.node.title = elements.nodeDialogInputTitle.value.trim() || "未命名节点";
-  found.node.detail = elements.nodeDialogInputDetail.value.trim();
-  saveTree(tree);
-  syncSelection();
-  elements.nodeDialog.close();
-  setStatus("节点已保存。");
+elements.nodeDialogExpand.addEventListener("click", () => {
+  expandFromNodeDialog();
 });
 
 window.addEventListener("resize", () => {
+  closeAllContextMenus();
   treeCanvas.resize();
 });
 
+window.addEventListener("pointerdown", (event) => {
+  if (!elements.nodeContextMenu.hidden && !elements.nodeContextMenu.contains(event.target)) {
+    closeNodeContextMenu();
+  }
+
+  if (!elements.canvasContextMenu.hidden && !elements.canvasContextMenu.contains(event.target)) {
+    closeCanvasContextMenu();
+  }
+});
+
+bindDialogBackdropClose(elements.helpDialog);
+bindDialogBackdropClose(elements.configDialog);
+bindDialogBackdropClose(elements.nodeDialog);
+llmConfigUi.renderAgentPanels();
 syncSelection();
 treeCanvas.resize();
 loadServerDefaults();
+
+window.__mindtreeTestApi = {
+  openNodeById(id) {
+    selectSingleNode(id);
+    syncSelection();
+    openNodeDialog();
+  },
+  getSelection() {
+    return {
+      ...getSelection(),
+      nodeContextMenuHidden: elements.nodeContextMenu.hidden,
+      canvasContextMenuHidden: elements.canvasContextMenu.hidden,
+      batchDeleteHidden: elements.contextDeleteSelectedNodes.hidden,
+    };
+  },
+  getTree() {
+    return JSON.parse(JSON.stringify(forest));
+  },
+};

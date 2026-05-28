@@ -16,6 +16,24 @@
     <div class="app-shell">
       <canvas id="tree-canvas"></canvas>
 
+      <div id="node-context-menu" class="context-menu" hidden>
+        <button id="context-edit-node" type="button" class="context-menu-item">打开</button>
+        <button id="context-add-child-node" type="button" class="context-menu-item">衍生空节点</button>
+        <button id="context-delete-node" type="button" class="context-menu-item danger">删除</button>
+      </div>
+
+      <div id="canvas-context-menu" class="context-menu" hidden>
+        <button id="context-add-root-node" type="button" class="context-menu-item">新增空节点</button>
+        <button
+          id="context-delete-selected-nodes"
+          type="button"
+          class="context-menu-item danger"
+          hidden
+        >
+          删除所选节点
+        </button>
+      </div>
+
       <div class="floating-shell">
         <div class="brand-chip">
           <div>
@@ -24,43 +42,51 @@
           </div>
         </div>
 
-        <button id="floating-config" class="floating-button" aria-label="Open config">
-          <span aria-hidden="true">⚙</span>
-        </button>
-      </div>
-
-      <div id="composer" class="composer">
-        <div class="composer-head">
-          <div>
-            <span>当前节点</span>
-            <strong id="selected-title">根问题</strong>
-          </div>
-          <p id="chain-summary-text">根问题</p>
+        <div class="floating-actions">
+          <button id="floating-help" class="floating-button" aria-label="Open help">
+            <span aria-hidden="true">?</span>
+          </button>
+          <button id="floating-config" class="floating-button" aria-label="Open config">
+            <span aria-hidden="true">⚙</span>
+          </button>
         </div>
-
-        <div class="composer-grid">
-          <input id="node-title" type="text" maxlength="80" placeholder="节点标题" />
-          <textarea
-            id="node-detail"
-            rows="4"
-            maxlength="800"
-            placeholder="推理内容，或对当前节点的补充说明"
-          ></textarea>
-        </div>
-
-        <div class="composer-actions">
-          <label class="field compact">
-            <span>生成数量</span>
-            <input id="branch-count" type="number" min="1" max="6" value="3" />
-          </label>
-          <button id="save-node" class="secondary-button">保存</button>
-          <button id="add-child" class="secondary-button">新增分支</button>
-          <button id="expand-node" class="primary-button">继续推演</button>
-        </div>
-
-        <p id="status" class="status">右键拖动画布，滚轮缩放，单击节点选中，双击节点详细编辑。</p>
       </div>
     </div>
+
+    <dialog id="help-dialog" class="config-dialog help-dialog">
+      <form method="dialog" class="config-card help-card">
+        <div class="config-head">
+          <div>
+            <p class="eyebrow">Guide</p>
+            <h2>操作说明</h2>
+          </div>
+          <button
+            id="close-help"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭帮助"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="help-content">
+          <div class="help-item">
+            <p class="section-title">画布交互</p>
+            <p>右键点击空白处打开画布菜单，右键拖动画布，滚轮缩放，左键拖动节点，左键在空白处拖拽可框选多个节点，点击空白处取消选中。</p>
+          </div>
+          <div class="help-item">
+            <p class="section-title">节点使用</p>
+            <p>单击节点选中，双击节点打开完整推演对话，查看当前节点的历史记录与 agent 反馈。</p>
+          </div>
+          <div class="help-item">
+            <p class="section-title">继续推演</p>
+            <p>在节点对话框底部输入新的推演方向后发送，系统会基于当前节点记录继续生成新的候选分支。</p>
+          </div>
+          <p id="status" class="status-chip">帮助与系统状态会显示在这里。</p>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="config-dialog" class="config-dialog">
       <form method="dialog" class="config-card">
@@ -69,68 +95,72 @@
             <p class="eyebrow">LLM Connection</p>
             <h2>Agent 配置</h2>
           </div>
-          <button value="cancel" class="ghost-button">关闭</button>
+          <button
+            id="close-config"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭配置"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
 
-        <div class="config-section">
-          <p class="section-title">Generator Agent</p>
+        <div class="config-layout">
+          <aside class="config-sidebar">
+            <button
+              id="config-tab-trigger-base"
+              type="button"
+              class="config-tab"
+              data-config-tab="base"
+            >
+              基础配置
+            </button>
+            <div id="config-agent-tabs" class="config-tab-list"></div>
+          </aside>
 
-          <label class="field">
-            <span>Base URL</span>
-            <input id="cfg-base-url" type="text" placeholder="https://api.siliconflow.cn/v1" />
-          </label>
+          <div class="config-content">
+            <section id="config-panel-base" class="config-panel">
+              <div class="config-section">
+                <p class="section-title">基础连接</p>
 
-          <label class="field">
-            <span>API Key</span>
-            <input id="cfg-api-key" type="password" placeholder="sk-..." />
-          </label>
+                <label class="field">
+                  <span>Base URL</span>
+                  <input id="cfg-base-url" type="text" placeholder="https://api.siliconflow.cn/v1" />
+                </label>
 
-          <label class="field">
-            <span>Model</span>
-            <select id="cfg-model-select"></select>
-          </label>
+                <label class="field">
+                  <span>API Key</span>
+                  <input id="cfg-api-key" type="password" placeholder="sk-..." />
+                </label>
 
-          <label id="cfg-model-custom-field" class="field">
-            <span>Custom Model</span>
-            <input id="cfg-model" type="text" placeholder="deepseek-ai/DeepSeek-V3.2" />
-          </label>
+                <label class="field">
+                  <span>Model</span>
+                  <select id="cfg-model-select"></select>
+                </label>
+
+                <label id="cfg-model-custom-field" class="field">
+                  <span>Custom Model</span>
+                  <input id="cfg-model" type="text" placeholder="deepseek-ai/DeepSeek-V3.2" />
+                </label>
+              </div>
+
+              <div class="config-section">
+                <p class="section-title">推演参数</p>
+
+                <label class="field">
+                  <span>Candidate Multiplier</span>
+                  <input id="cfg-candidate-multiplier" type="number" min="1" max="6" value="3" />
+                </label>
+              </div>
+
+              <div id="model-options" class="dynamic-fields"></div>
+            </section>
+
+            <div id="config-agent-panels"></div>
+          </div>
         </div>
 
-        <div class="config-section">
-          <p class="section-title">Oracle Agent</p>
-
-          <label class="field">
-            <span>Base URL</span>
-            <input
-              id="cfg-oracle-base-url"
-              type="text"
-              placeholder="默认与 Generator Agent 一致"
-            />
-          </label>
-
-          <label class="field">
-            <span>API Key</span>
-            <input id="cfg-oracle-api-key" type="password" placeholder="默认与 Generator Agent 一致" />
-          </label>
-
-          <label class="field">
-            <span>Model</span>
-            <input id="cfg-oracle-model" type="text" placeholder="默认与 Generator Agent 一致" />
-          </label>
-        </div>
-
-        <div class="config-section">
-          <p class="section-title">推演参数</p>
-
-          <label class="field">
-            <span>Candidate Multiplier</span>
-            <input id="cfg-candidate-multiplier" type="number" min="1" max="6" value="3" />
-          </label>
-        </div>
-
-        <div id="model-options" class="dynamic-fields"></div>
-
-        <div class="actions">
+        <div class="actions actions-end">
           <button id="save-config" value="default" class="primary-button">保存配置</button>
         </div>
       </form>
@@ -139,25 +169,35 @@
     <dialog id="node-dialog" class="config-dialog">
       <form method="dialog" class="config-card">
         <div class="config-head">
-          <div>
-            <p class="eyebrow">Node Editor</p>
-            <h2 id="node-dialog-title">节点编辑</h2>
+          <div class="node-dialog-titlebar">
+            <p class="eyebrow">Reasoning Record</p>
+            <h2 id="node-dialog-summary" class="node-dialog-summary-text">未命名节点</h2>
           </div>
-          <button value="cancel" class="ghost-button">关闭</button>
+          <button
+            id="close-node-dialog"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭节点编辑"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
 
-        <label class="field">
-          <span>标题</span>
-          <input id="node-dialog-input-title" type="text" maxlength="80" />
-        </label>
+        <div class="node-dialog-shell">
+          <div class="node-dialog-content message-thread-panel">
+            <div id="node-dialog-messages" class="message-thread"></div>
+          </div>
 
-        <label class="field">
-          <span>推理内容</span>
-          <textarea id="node-dialog-input-detail" rows="8" maxlength="800"></textarea>
-        </label>
-
-        <div class="actions">
-          <button id="node-dialog-save" value="default" class="primary-button">保存节点</button>
+          <div class="node-dialog-composer">
+            <textarea
+              id="node-dialog-direction"
+              rows="3"
+              maxlength="500"
+              placeholder="描述你希望继续推演的方向、约束、信号或问题"
+            ></textarea>
+            <button id="node-dialog-expand" type="button" class="primary-button">发送</button>
+            <p id="node-dialog-status" class="status-inline">输入新的方向后，继续推演这个节点。</p>
+          </div>
         </div>
       </form>
     </dialog>

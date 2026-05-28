@@ -1,13 +1,13 @@
 const { createHttpError } = require("./errors");
 const { requestModelJson } = require("./llm-client");
 const { buildGenerationPrompt, buildOraclePrompt } = require("./prompts");
-const { mergeLlmConfig } = require("./config");
+const { mergeLlmConfig, resolveAgentConnection } = require("./config");
 
 function normalizeBranches(branches) {
   return branches
-    .filter((branch) => branch && branch.title)
+    .filter((branch) => branch && branch.summary)
     .map((branch) => ({
-      title: String(branch.title).trim(),
+      summary: String(branch.summary).trim(),
       detail: String(branch.detail || "").trim(),
     }));
 }
@@ -25,26 +25,30 @@ function validateExpandInput(chain, config) {
 async function requestBranches({
   chain,
   branchCount = 3,
+  direction = "",
   config = {},
   fetchImpl = fetch,
 }) {
   const mergedConfig = mergeLlmConfig(config);
   validateExpandInput(chain, mergedConfig);
+  const candidateMultiplier = Math.max(1, Number(mergedConfig.candidateMultiplier) || 1);
 
   const candidateCount = Math.max(
     branchCount,
-    branchCount * (mergedConfig.candidateMultiplier || 1)
+    branchCount * candidateMultiplier
   );
+  const generatorConfig = resolveAgentConnection(mergedConfig, "generator");
 
   const generated = await requestModelJson({
-    baseUrl: mergedConfig.baseUrl,
-    apiKey: mergedConfig.apiKey,
-    model: mergedConfig.model,
+    baseUrl: generatorConfig.baseUrl,
+    apiKey: generatorConfig.apiKey,
+    model: generatorConfig.model,
     config: mergedConfig,
     prompt: buildGenerationPrompt(
       chain,
       candidateCount,
-      mergedConfig.generatorSystemPrompt
+      mergedConfig.generatorSystemPrompt,
+      direction
     ),
     fetchImpl,
   });
@@ -58,10 +62,11 @@ async function requestBranches({
     return candidates;
   }
 
+  const oracleConfig = resolveAgentConnection(mergedConfig, "oracle");
   const filtered = await requestModelJson({
-    baseUrl: mergedConfig.oracleBaseUrl || mergedConfig.baseUrl,
-    apiKey: mergedConfig.oracleApiKey || mergedConfig.apiKey,
-    model: mergedConfig.oracleModel || mergedConfig.model,
+    baseUrl: oracleConfig.baseUrl,
+    apiKey: oracleConfig.apiKey,
+    model: oracleConfig.model,
     config: mergedConfig,
     prompt: buildOraclePrompt(
       chain,

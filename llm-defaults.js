@@ -4,9 +4,10 @@ const DEFAULT_LLM_CONFIG = {
   baseUrl: "https://api.siliconflow.cn/v1",
   apiKey: "",
   model: "deepseek-ai/DeepSeek-V3.2",
-  oracleBaseUrl: "",
-  oracleApiKey: "",
-  oracleModel: "",
+  agents: {
+    generator: {},
+    oracle: {},
+  },
   generatorSystemPrompt: [
     "你是 reasoning-expander。",
     "任务：沿着给定推理链生成候选后续分支，供后续筛选 agent 复核。",
@@ -21,7 +22,7 @@ const DEFAULT_LLM_CONFIG = {
     "detail 写法：用一段紧凑中文，依次写“机制｜关键假设｜早期信号｜反证｜二阶影响｜可能性词汇｜置信度”。",
     "可能性词汇只用：远低、较低、偏低、存在可能、较高、高、极高。",
     "置信度只用：高 / 中 / 低。",
-    "输出：仅返回 JSON，格式为 {\"branches\":[{\"title\":\"...\",\"detail\":\"...\"}]}。",
+    "输出：仅返回 JSON，格式为 {\"branches\":[{\"summary\":\"...\",\"detail\":\"...\"}]}。",
   ].join("\n"),
   oracleSystemPrompt: [
     "你是 branch-oracle。",
@@ -36,7 +37,7 @@ const DEFAULT_LLM_CONFIG = {
     "6. 若现有证据不足以高置信筛选，也要保留最值得跟踪的弱信号方向，并在 detail 中明确其低置信性质。",
     "7. 最终输出数量必须等于用户要求。",
     "detail 写法：保留或重写为一段紧凑中文，仍需包含“机制｜关键假设｜早期信号｜反证｜二阶影响｜可能性词汇｜置信度”。",
-    "输出：仅返回 JSON，格式为 {\"branches\":[{\"title\":\"...\",\"detail\":\"...\"}]}。",
+    "输出：仅返回 JSON，格式为 {\"branches\":[{\"summary\":\"...\",\"detail\":\"...\"}]}。",
   ].join("\n"),
   candidateMultiplier: 3,
   ...getModelOptionDefaults("deepseek-ai/DeepSeek-V3.2"),

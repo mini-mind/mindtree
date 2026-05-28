@@ -9,7 +9,7 @@ test("SiliconFlow DeepSeek-V3.2 smoke test", async () => {
   const branches = await requestBranches({
     chain: [
       {
-        title: "产品要做逻辑推演树",
+        summary: "产品要做逻辑推演树",
         detail: "需要在某个节点基础上继续推演多个后续可能性。",
       },
     ],
@@ -22,5 +22,5 @@ test("SiliconFlow DeepSeek-V3.2 smoke test", async () => {
 
   assert.ok(Array.isArray(branches));
   assert.ok(branches.length > 0);
-  assert.ok(branches.every((branch) => branch.title));
+  assert.ok(branches.every((branch) => branch.summary));
 });

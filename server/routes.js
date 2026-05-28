@@ -17,10 +17,11 @@ function createApp({ fetchImpl = fetch } = {}) {
 
   app.post("/api/expand", async (req, res) => {
     try {
-      const { chain, branchCount = 3, config = {} } = req.body || {};
+      const { chain, branchCount = 3, direction = "", config = {} } = req.body || {};
       const branches = await requestBranches({
         chain,
         branchCount,
+        direction,
         config,
         fetchImpl,
       });

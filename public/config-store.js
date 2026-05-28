@@ -7,10 +7,11 @@ const localFallbackConfig = {
   baseUrl: "https://api.siliconflow.cn/v1",
   apiKey: "",
   model: "deepseek-ai/DeepSeek-V3.2",
-  oracleBaseUrl: "",
-  oracleApiKey: "",
-  oracleModel: "",
   candidateMultiplier: 3,
+  agents: {
+    generator: {},
+    oracle: {},
+  },
 };
 
 export function loadTree() {
