@@ -1,7 +1,7 @@
 {
   "name": "mindtree",
   "version": "1.0.0",
-  "description": "Reasoning tree canvas with LLM expansion",
+  "description": "Directed graph workspace with extensible node agents",
   "main": "server.js",
   "scripts": {
     "dev": "node --watch server.js",

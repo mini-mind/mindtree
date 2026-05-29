@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MindTree</title>
+    <title>MindGraph</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -14,16 +14,15 @@
   </head>
   <body>
     <div class="app-shell">
-      <canvas id="tree-canvas"></canvas>
+      <canvas id="graph-canvas"></canvas>
 
       <div id="node-context-menu" class="context-menu" hidden>
         <button id="context-edit-node" type="button" class="context-menu-item">打开</button>
-        <button id="context-add-child-node" type="button" class="context-menu-item">衍生空节点</button>
         <button id="context-delete-node" type="button" class="context-menu-item danger">删除</button>
       </div>
 
       <div id="canvas-context-menu" class="context-menu" hidden>
-        <button id="context-add-root-node" type="button" class="context-menu-item">新增空节点</button>
+        <button id="context-add-node" type="button" class="context-menu-item">新增节点...</button>
         <button
           id="context-delete-selected-nodes"
           type="button"
@@ -37,8 +36,8 @@
       <div class="floating-shell">
         <div class="brand-chip">
           <div>
-            <p class="eyebrow">Reasoning Tree</p>
-            <h1>MindTree</h1>
+            <p class="eyebrow">Directed Graph Workspace</p>
+            <h1>MindGraph</h1>
           </div>
         </div>
 
@@ -77,11 +76,11 @@
           </div>
           <div class="help-item">
             <p class="section-title">节点使用</p>
-            <p>单击节点选中，双击节点打开完整推演对话，查看当前节点的历史记录与 agent 反馈。</p>
+            <p>单击节点选中，双击节点打开节点对话框，查看当前节点的历史记录与 agent 反馈。</p>
           </div>
           <div class="help-item">
-            <p class="section-title">继续推演</p>
-            <p>在节点对话框底部输入新的推演方向后发送，系统会基于当前节点记录继续生成新的候选分支。</p>
+            <p class="section-title">节点记录</p>
+            <p>在节点对话框底部输入新的记录、问题或说明后发送；Agent 节点会调用模型响应，普通节点会保存为消息记录。</p>
           </div>
           <p id="status" class="status-chip">帮助与系统状态会显示在这里。</p>
         </div>
@@ -144,15 +143,6 @@
                 </label>
               </div>
 
-              <div class="config-section">
-                <p class="section-title">推演参数</p>
-
-                <label class="field">
-                  <span>Candidate Multiplier</span>
-                  <input id="cfg-candidate-multiplier" type="number" min="1" max="6" value="3" />
-                </label>
-              </div>
-
               <div id="model-options" class="dynamic-fields"></div>
             </section>
 
@@ -170,7 +160,7 @@
       <form method="dialog" class="config-card">
         <div class="config-head">
           <div class="node-dialog-titlebar">
-            <p class="eyebrow">Reasoning Record</p>
+            <p class="eyebrow">Node Record</p>
             <h2 id="node-dialog-summary" class="node-dialog-summary-text">未命名节点</h2>
           </div>
           <button
@@ -185,6 +175,7 @@
 
         <div class="node-dialog-shell">
           <div class="node-dialog-content message-thread-panel">
+            <div id="node-dialog-panel" class="node-dialog-panel" hidden></div>
             <div id="node-dialog-messages" class="message-thread"></div>
           </div>
 
@@ -193,11 +184,89 @@
               id="node-dialog-direction"
               rows="3"
               maxlength="500"
-              placeholder="描述你希望继续推演的方向、约束、信号或问题"
+              placeholder="输入一条记录、问题、任务或说明"
             ></textarea>
-            <button id="node-dialog-expand" type="button" class="primary-button">发送</button>
-            <p id="node-dialog-status" class="status-inline">输入新的方向后，继续推演这个节点。</p>
+            <button id="node-dialog-submit" type="button" class="primary-button">发送</button>
+            <p id="node-dialog-status" class="status-inline">输入一条记录、问题或说明后发送到当前节点。</p>
           </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="create-node-dialog" class="config-dialog">
+      <form method="dialog" class="config-card create-node-card">
+        <div class="config-head">
+          <div>
+            <p class="eyebrow">Create Node</p>
+            <h2 id="create-node-title">新增节点</h2>
+          </div>
+          <button
+            id="close-create-node-dialog"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭新增节点"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="create-node-layout">
+          <section class="config-section">
+            <p class="section-title">节点类型</p>
+            <div id="create-node-type-list" class="option-list"></div>
+          </section>
+
+        </div>
+
+        <p id="create-node-description" class="config-hint">选择节点类型后创建。</p>
+
+        <div class="actions actions-end">
+          <button id="confirm-create-node" type="button" class="primary-button">创建</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="create-edge-dialog" class="config-dialog">
+      <form method="dialog" class="config-card create-node-card">
+        <div class="config-head">
+          <div>
+            <p class="eyebrow">Create Edge</p>
+            <h2 id="create-edge-title">创建连接</h2>
+          </div>
+          <button
+            id="close-create-edge-dialog"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭创建连接"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="config-section">
+          <p class="section-title">关系类型</p>
+          <div id="create-edge-type-list" class="option-list"></div>
+        </div>
+
+        <label class="field">
+          <span>标签</span>
+          <input id="create-edge-label" type="text" maxlength="120" placeholder="可选的关系说明" />
+        </label>
+
+        <label class="field">
+          <span>备注</span>
+          <textarea
+            id="create-edge-note"
+            rows="4"
+            maxlength="500"
+            placeholder="可选的附加信息"
+          ></textarea>
+        </label>
+
+        <p id="create-edge-description" class="config-hint">选择关系类型并填写可选属性后创建。</p>
+
+        <div class="actions actions-end">
+          <button id="confirm-create-edge" type="button" class="primary-button">创建连接</button>
         </div>
       </form>
     </dialog>

@@ -1,8 +1,8 @@
 const express = require("express");
 const path = require("path");
+const { runNodeAgent } = require("./agent-service");
 const { buildDefaultConfigResponse } = require("./config");
 const { mapApiError } = require("./errors");
-const { requestBranches } = require("./reasoning-service");
 
 function createApp({ fetchImpl = fetch } = {}) {
   const app = express();
@@ -15,17 +15,24 @@ function createApp({ fetchImpl = fetch } = {}) {
     res.json(defaultConfigResponse);
   });
 
-  app.post("/api/expand", async (req, res) => {
+  app.post("/api/agent-run", async (req, res) => {
     try {
-      const { chain, branchCount = 3, direction = "", config = {} } = req.body || {};
-      const branches = await requestBranches({
-        chain,
-        branchCount,
-        direction,
+      const {
+        agentKey,
+        context,
+        prompt,
+        config = {},
+        systemPrompt = "",
+      } = req.body || {};
+      const result = await runNodeAgent({
+        agentKey,
+        context,
+        prompt,
         config,
+        systemPrompt,
         fetchImpl,
       });
-      res.json({ branches });
+      res.json(result);
     } catch (error) {
       const mapped = mapApiError(error, defaultConfigResponse.knownModels);
       res.status(mapped.statusCode).json(mapped.body);

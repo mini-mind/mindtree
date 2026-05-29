@@ -1,56 +1,28 @@
-const { DEFAULT_LLM_CONFIG } = require("../llm-defaults");
+function formatMessages(messages = []) {
+  return messages
+    .map((message) => `${message.role === "user" ? "输入" : "反馈"}：${message.content}`.trim())
+    .filter(Boolean)
+    .join("\n");
+}
 
-function formatChain(chain) {
-  return chain
-    .map((node, index) => `${index + 1}. ${node.summary || ""}\n${node.detail || ""}`.trim())
+function formatNode(node, index = null) {
+  const summary = node?.data?.summary || "";
+  const detail = formatMessages(node?.data?.messages || []);
+  const content = `${summary}\n${detail}`.trim();
+  if (index === null) {
+    return content;
+  }
+  return `${index + 1}. ${content}`.trim();
+}
+
+function formatRelations(relations = []) {
+  return relations
+    .map((relation, index) => `${index + 1}. [${relation.type}] ${formatNode(relation.node)}`.trim())
     .join("\n\n");
-}
-
-function formatBranchPool(branches) {
-  return branches
-    .map(
-      (branch, index) => `${index + 1}. ${branch.summary || ""}\n${branch.detail || ""}`.trim()
-    )
-    .join("\n\n");
-}
-
-function buildGenerationPrompt(chain, branchCount, systemPrompt, direction = "") {
-  return {
-    system: systemPrompt || DEFAULT_LLM_CONFIG.generatorSystemPrompt,
-    user: [
-      "Given the reasoning chain below, infer plausible next branches.",
-      `Need ${branchCount} candidate branches.`,
-      direction ? `Focus direction: ${direction}` : "",
-      "Return JSON only in the form:",
-      '{"branches":[{"summary":"one-sentence branch summary","detail":"one-paragraph explanation"}]}',
-      "",
-      "Reasoning chain:",
-      formatChain(chain),
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  };
-}
-
-function buildOraclePrompt(chain, branches, branchCount, systemPrompt) {
-  return {
-    system: systemPrompt || DEFAULT_LLM_CONFIG.oracleSystemPrompt,
-    user: [
-      "Given the reasoning chain and the candidate branch pool below, keep only the strongest next branches.",
-      `Return exactly ${branchCount} branches.`,
-      "Return JSON only in the form:",
-      '{"branches":[{"summary":"one-sentence branch summary","detail":"one-paragraph explanation"}]}',
-      "",
-      "Reasoning chain:",
-      formatChain(chain),
-      "",
-      "Candidate branch pool:",
-      formatBranchPool(branches),
-    ].join("\n"),
-  };
 }
 
 module.exports = {
-  buildGenerationPrompt,
-  buildOraclePrompt,
+  formatMessages,
+  formatNode,
+  formatRelations,
 };

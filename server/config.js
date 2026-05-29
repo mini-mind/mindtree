@@ -5,7 +5,6 @@ function buildDefaultConfigResponse() {
   return {
     baseUrl: DEFAULT_LLM_CONFIG.baseUrl,
     model: DEFAULT_LLM_CONFIG.model,
-    candidateMultiplier: DEFAULT_LLM_CONFIG.candidateMultiplier,
     agents: DEFAULT_LLM_CONFIG.agents,
     modelCapabilities: MODEL_CAPABILITIES,
     knownModels: Object.keys(MODEL_CAPABILITIES),

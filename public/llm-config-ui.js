@@ -15,17 +15,11 @@ function normalizeTextValue(value) {
   return typeof value === "string" ? value : "";
 }
 
-function normalizeCandidateMultiplier(value, fallbackValue) {
-  const normalized = Number(value);
-  return Number.isFinite(normalized) && normalized >= 1 ? normalized : fallbackValue;
-}
-
 export function normalizeStoredConfig(agentDefinitions, config = {}) {
   const normalized = {
     baseUrl: normalizeTextValue(config.baseUrl),
     apiKey: normalizeTextValue(config.apiKey),
     model: normalizeTextValue(config.model),
-    candidateMultiplier: normalizeCandidateMultiplier(config.candidateMultiplier, 3),
     agents: createEmptyAgentOverrides(agentDefinitions),
   };
 
@@ -54,10 +48,6 @@ export function buildInitialConfig(agentDefinitions, baseConfig, storedConfig, c
     baseUrl: resolvedBaseUrl,
     apiKey: resolvedApiKey,
     model: resolvedModel,
-    candidateMultiplier: normalizeCandidateMultiplier(
-      normalizedStored.candidateMultiplier,
-      baseConfig.candidateMultiplier
-    ),
     agents: {
       ...createEmptyAgentOverrides(agentDefinitions),
       ...(normalizedStored.agents || {}),
@@ -274,7 +264,6 @@ export function createLlmConfigController({
     elements.cfgApiKey.value = config.apiKey;
     elements.cfgModel.value = config.model;
     renderModelSelect();
-    elements.cfgCandidateMultiplier.value = String(config.candidateMultiplier);
     renderModelOptions(config.model || serverConfig.model);
 
     agentDefinitions.forEach((agent) => {
@@ -298,10 +287,6 @@ export function createLlmConfigController({
 
   function collectForm() {
     const config = getConfig();
-    const fallbackCandidateMultiplier = normalizeCandidateMultiplier(
-      config.candidateMultiplier,
-      serverConfig.candidateMultiplier
-    );
     const nextConfig = {
       ...config,
       baseUrl: elements.cfgBaseUrl.value.trim(),
@@ -310,10 +295,6 @@ export function createLlmConfigController({
         elements.cfgModelSelect.value === "__custom__"
           ? elements.cfgModel.value.trim()
           : elements.cfgModelSelect.value,
-      candidateMultiplier: normalizeCandidateMultiplier(
-        elements.cfgCandidateMultiplier.value,
-        fallbackCandidateMultiplier
-      ),
       agents: createEmptyAgentOverrides(agentDefinitions),
     };
 

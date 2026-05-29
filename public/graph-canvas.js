@@ -1,6 +1,7 @@
-import { walkForest } from "./tree-model.js";
+import { getEdgeCanvasStyle, rendersEdgeOnCanvas } from "./edge-types.js";
+import { getCanvasNodeSummary } from "./node-types.js";
 
-export const TREE_CANVAS_THEME = {
+export const GRAPH_CANVAS_THEME = {
   nodeWidth: 220,
   nodeMinHeight: 88,
 };
@@ -22,7 +23,7 @@ function roundRect(context, x, y, width, height, radius) {
   context.closePath();
 }
 
-export function createTreeCanvas(
+export function createGraphCanvas(
   canvas,
   {
     onNodeSelect,
@@ -32,6 +33,7 @@ export function createTreeCanvas(
     onNodeMove,
     onNodeContextMenu,
     onBackgroundContextMenu,
+    onEdgeCreate,
   }
 ) {
   const ctx = canvas.getContext("2d");
@@ -51,9 +53,10 @@ export function createTreeCanvas(
   const pointerState = {
     contextMenuCandidate: null,
     selectionBox: null,
+    edgeDraft: null,
   };
   let hitRegions = [];
-  let currentForest = null;
+  let currentGraph = null;
   let currentSelectedId = null;
   let currentSelectedIds = [];
   let lastHitId = null;
@@ -121,17 +124,17 @@ export function createTreeCanvas(
     return rows;
   }
 
-  function layoutForest(forest) {
+  function layoutGraph(graph) {
     const layout = new Map();
 
-    walkForest(forest, (node, depth) => {
-      const summaryRows = truncateRows(node.summary, 18, 3);
-      const width = TREE_CANVAS_THEME.nodeWidth;
-      const height = Math.max(TREE_CANVAS_THEME.nodeMinHeight, 46 + summaryRows.length * 18);
+    graph.nodes.forEach((node) => {
+      const summaryRows = truncateRows(getCanvasNodeSummary(node), 18, 3);
+      const width = GRAPH_CANVAS_THEME.nodeWidth;
+      const height = Math.max(GRAPH_CANVAS_THEME.nodeMinHeight, 46 + summaryRows.length * 18);
 
       layout.set(node.id, {
-        x: node.offsetX || 0,
-        y: node.offsetY || 0,
+        x: node.x || 0,
+        y: node.y || 0,
         width,
         height,
         summaryRows,
@@ -234,16 +237,17 @@ export function createTreeCanvas(
     };
   }
 
-  function drawLink(parentBox, childBox) {
+  function drawLink(edge, parentBox, childBox) {
     const from = worldToScreen(parentBox.x + parentBox.width, parentBox.y + parentBox.height / 2);
     const to = worldToScreen(childBox.x, childBox.y + childBox.height / 2);
     const mid = (from.x + to.x) / 2;
     const control1 = { x: mid, y: from.y };
     const control2 = { x: mid, y: to.y };
+    const style = getEdgeCanvasStyle(edge);
 
     ctx.save();
-    ctx.strokeStyle = "rgba(70, 84, 98, 0.28)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = style.strokeStyle;
+    ctx.lineWidth = style.lineWidth;
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.bezierCurveTo(control1.x, control1.y, control2.x, control2.y, to.x, to.y);
@@ -257,8 +261,8 @@ export function createTreeCanvas(
       const leadPoint = cubicPoint(from, control1, control2, to, progress);
       const trailPoint = cubicPoint(from, control1, control2, to, trail);
 
-      ctx.strokeStyle = `rgba(166, 123, 53, ${0.18 + index * 0.09})`;
-      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = style.pulseColor.replace("ALPHA", `${0.18 + index * 0.09}`);
+      ctx.lineWidth = style.pulseLineWidth;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(trailPoint.x, trailPoint.y);
@@ -343,6 +347,34 @@ export function createTreeCanvas(
     ctx.restore();
   }
 
+  function drawEdgeDraft(draft) {
+    if (!draft) {
+      return;
+    }
+
+    const sourceRegion = hitRegions.find((item) => item.id === draft.sourceId);
+    if (!sourceRegion) {
+      return;
+    }
+
+    const from = {
+      x: sourceRegion.x + sourceRegion.width,
+      y: sourceRegion.y + sourceRegion.height / 2,
+    };
+    const to = { x: draft.currentX, y: draft.currentY };
+    const mid = (from.x + to.x) / 2;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(166, 123, 53, 0.6)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.bezierCurveTo(mid, from.y, mid, to.y, to.x, to.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawMinimap(layout, contentBounds, width, height) {
     const viewportBounds = getViewportBounds(width, height);
     const bounds = mergeBounds([contentBounds, viewportBounds]);
@@ -414,30 +446,41 @@ export function createTreeCanvas(
     drawGrid(width, height);
     hitRegions = [];
 
-    if (!currentForest?.length) {
+    if (!currentGraph?.nodes.length) {
       return;
     }
 
-    const layout = layoutForest(currentForest);
+    const layout = layoutGraph(currentGraph);
     const bounds = getLayoutBounds(layout);
 
-    walkForest(currentForest, (node) => {
-      const box = layout.get(node.id);
-      node.children.forEach((child) => {
-        drawLink(box, layout.get(child.id));
+    currentGraph.edges
+      .filter((edge) => rendersEdgeOnCanvas(edge))
+      .forEach((edge) => {
+        const source = layout.get(edge.source);
+        const target = layout.get(edge.target);
+        if (source && target) {
+          drawLink(edge, source, target);
+        }
       });
-    });
 
-    walkForest(currentForest, (node) => {
+    currentGraph.nodes.forEach((node) => {
+      const box = layout.get(node.id);
+      if (!box) {
+        return;
+      }
       drawNode(
         node,
-        layout.get(node.id),
+        box,
         node.id === currentSelectedId || currentSelectedIds.includes(node.id)
       );
     });
 
     if (pointerState.selectionBox) {
       drawSelectionBox(pointerState.selectionBox);
+    }
+
+    if (pointerState.edgeDraft) {
+      drawEdgeDraft(pointerState.edgeDraft);
     }
 
     drawMinimap(layout, bounds, width, height);
@@ -478,6 +521,15 @@ export function createTreeCanvas(
         startY: event.clientY,
         moved: false,
       };
+
+      if (hit) {
+        pointerState.edgeDraft = {
+          sourceId: hit.id,
+          currentX: event.clientX,
+          currentY: event.clientY,
+          moved: false,
+        };
+      }
 
       if (!hit) {
         view.draggingCanvas = false;
@@ -525,7 +577,16 @@ export function createTreeCanvas(
         if (pointerState.contextMenuCandidate.hitId === null) {
           view.draggingCanvas = true;
         }
+        if (pointerState.edgeDraft) {
+          pointerState.edgeDraft.moved = true;
+        }
       }
+    }
+
+    if (pointerState.edgeDraft) {
+      pointerState.edgeDraft.currentX = event.clientX;
+      pointerState.edgeDraft.currentY = event.clientY;
+      draw();
     }
 
     if (draggingNodeId !== null) {
@@ -589,7 +650,9 @@ export function createTreeCanvas(
 
     if (event.button === 2 && pointerState.contextMenuCandidate) {
       const { hitId, moved } = pointerState.contextMenuCandidate;
+      const edgeDraft = pointerState.edgeDraft;
       pointerState.contextMenuCandidate = null;
+      pointerState.edgeDraft = null;
 
       if (!moved) {
         if (hitId !== null) {
@@ -597,7 +660,24 @@ export function createTreeCanvas(
         } else {
           onBackgroundContextMenu?.({ x: event.clientX, y: event.clientY });
         }
+      } else if (edgeDraft?.moved && edgeDraft.sourceId !== null) {
+        const dropHit = hitRegions.find(
+          (region) =>
+            event.clientX >= region.x &&
+            event.clientX <= region.x + region.width &&
+            event.clientY >= region.y &&
+            event.clientY <= region.y + region.height
+        );
+
+        if (dropHit && dropHit.id !== edgeDraft.sourceId) {
+          onEdgeCreate?.(edgeDraft.sourceId, dropHit.id, {
+            x: event.clientX,
+            y: event.clientY,
+          });
+        }
       }
+
+      draw();
     }
 
     view.draggingCanvas = false;
@@ -607,6 +687,7 @@ export function createTreeCanvas(
   canvas.addEventListener("pointerleave", () => {
     pointerState.contextMenuCandidate = null;
     pointerState.selectionBox = null;
+    pointerState.edgeDraft = null;
     view.draggingCanvas = false;
     draggingNodeId = null;
   });
@@ -636,8 +717,8 @@ export function createTreeCanvas(
 
   return {
     resize,
-    render(forest, selectedId, selectedIds = []) {
-      currentForest = forest;
+    render(graph, selectedId, selectedIds = []) {
+      currentGraph = graph;
       currentSelectedId = selectedId;
       currentSelectedIds = selectedIds;
       draw();

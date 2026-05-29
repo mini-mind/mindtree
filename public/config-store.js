@@ -1,29 +1,31 @@
 const storageKeys = {
-  tree: "mindtree.tree.v1",
+  graph: "mindtree.graph.v1",
   config: "mindtree.llm.v1",
 };
+
+function clearStoredGraph() {
+  localStorage.removeItem(storageKeys.graph);
+}
 
 const localFallbackConfig = {
   baseUrl: "https://api.siliconflow.cn/v1",
   apiKey: "",
   model: "deepseek-ai/DeepSeek-V3.2",
-  candidateMultiplier: 3,
   agents: {
-    generator: {},
-    oracle: {},
+    assistant: {},
   },
 };
 
-export function loadTree() {
+export function loadGraph() {
   try {
-    return JSON.parse(localStorage.getItem(storageKeys.tree));
+    return JSON.parse(localStorage.getItem(storageKeys.graph));
   } catch {
     return null;
   }
 }
 
-export function saveTree(tree) {
-  localStorage.setItem(storageKeys.tree, JSON.stringify(tree));
+export function saveGraph(graph) {
+  localStorage.setItem(storageKeys.graph, JSON.stringify(graph));
 }
 
 export function loadStoredConfig() {
@@ -41,3 +43,5 @@ export function saveConfig(config) {
 export function getLocalFallbackConfig() {
   return { ...localFallbackConfig };
 }
+
+export { clearStoredGraph };
