@@ -13,6 +13,7 @@ import {
   deleteNodeFromGraph,
   getMaxGraphId,
   getNodeById,
+  getNodePosition,
   normalizeGraph,
 } from "./graph-model.js";
 import { GraphValidationError } from "./graph-validation.js";
@@ -566,8 +567,9 @@ const graphCanvas = createGraphCanvas(canvas, {
     if (!node) {
       return;
     }
-    node.x = (node.x || 0) + deltaX;
-    node.y = (node.y || 0) + deltaY;
+    const position = getNodePosition(node);
+    node.data.x = position.x + deltaX;
+    node.data.y = position.y + deltaY;
     persistGraph();
     syncSelection();
   },

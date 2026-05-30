@@ -49,6 +49,17 @@ async function readStoredGraph(page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem("mindzoo.graph.v2") || "null"));
 }
 
+function withPosition(node, x, y) {
+  return {
+    ...node,
+    data: {
+      ...(node.data || {}),
+      x,
+      y,
+    },
+  };
+}
+
 async function openNodeByDoubleClick(page, nodeId) {
   await page.waitForFunction(
     (id) => {
@@ -253,9 +264,9 @@ test("UI supports marquee selection and batch delete", async () => {
     await page.goto(`http://127.0.0.1:${port}/?test=1`, { waitUntil: "networkidle0" });
     await seedGraph(page, {
       nodes: [
-        { id: 1, type: "note", x: 0, y: -220, data: { summary: "", messages: [] } },
-        { id: 2, type: "note", x: 0, y: 0, data: { summary: "", messages: [] } },
-        { id: 3, type: "note", x: 0, y: 220, data: { summary: "", messages: [] } },
+        withPosition({ id: 1, type: "note", data: { summary: "", messages: [] } }, 0, -220),
+        withPosition({ id: 2, type: "note", data: { summary: "", messages: [] } }, 0, 0),
+        withPosition({ id: 3, type: "note", data: { summary: "", messages: [] } }, 0, 220),
       ],
     });
 
@@ -298,8 +309,8 @@ test("UI minimap supports click and drag navigation", async () => {
     await page.goto(`http://127.0.0.1:${port}/?test=1`, { waitUntil: "networkidle0" });
     await seedGraph(page, {
       nodes: [
-        { id: 1, type: "note", x: 0, y: 0, data: { summary: "起点", messages: [] } },
-        { id: 2, type: "note", x: 1800, y: 1200, data: { summary: "远端节点", messages: [] } },
+        withPosition({ id: 1, type: "note", data: { summary: "起点", messages: [] } }, 0, 0),
+        withPosition({ id: 2, type: "note", data: { summary: "远端节点", messages: [] } }, 1800, 1200),
       ],
     });
 
@@ -394,9 +405,9 @@ test("UI extracts agent-owned linked entities", async () => {
         {
           id: 1,
           type: "agent",
-          x: 0,
-          y: 0,
           data: {
+            x: 0,
+            y: 0,
             summary: "执行 Agent",
             messages: [],
             agentKey: "assistant",
@@ -413,9 +424,7 @@ test("UI extracts agent-owned linked entities", async () => {
         {
           id: 2,
           type: "task_board",
-          x: 260,
-          y: 0,
-          data: { summary: "共享任务板", items: [], messages: [] },
+          data: { x: 260, y: 0, summary: "共享任务板", items: [], messages: [] },
         },
       ],
     });
@@ -493,9 +502,9 @@ test("UI agent can consume queued plugin messages before running", async () => {
         {
           id: 1,
           type: "agent",
-          x: 0,
-          y: 0,
           data: {
+            x: 0,
+            y: 0,
             summary: "队列 Agent",
             messages: [],
             agentKey: "assistant",
@@ -576,8 +585,8 @@ test("UI rejects duplicate node ids in the test bridge", async () => {
         "mindzoo.graph.v2",
         JSON.stringify({
           nodes: [
-            { id: 1, type: "note", x: 0, y: 0, data: { summary: "", messages: [] } },
-            { id: 1, type: "note", x: 200, y: 0, data: { summary: "", messages: [] } },
+            { id: 1, type: "note", data: { x: 0, y: 0, summary: "", messages: [] } },
+            { id: 1, type: "note", data: { x: 200, y: 0, summary: "", messages: [] } },
           ],
         })
       );
@@ -727,8 +736,8 @@ test("UI supports mobile touch interactions for create, open, and move", async (
 
     const graphAfterMove = await readStoredGraph(page);
     const movedNode = graphAfterMove.nodes.find((node) => node.id === newNodeId);
-    assert.ok(movedNode.x > beforeMove.x + 20);
-    assert.ok(movedNode.y > beforeMove.y + 20);
+    assert.ok(movedNode.data.x > beforeMove.data.x + 20);
+    assert.ok(movedNode.data.y > beforeMove.data.y + 20);
   } finally {
     await browser.close();
     server.close();

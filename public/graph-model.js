@@ -11,6 +11,8 @@ function getBlueprint(type = DEFAULT_BLUEPRINT_KEY) {
 
 function createBlueprintDataDefaults(blueprint) {
   return {
+    x: 0,
+    y: 0,
     summary:
       blueprint.key === "agent"
         ? "新 Agent"
@@ -38,9 +40,11 @@ export function createNode(id, x = 0, y = 0, type = DEFAULT_BLUEPRINT_KEY) {
   return {
     id,
     type: blueprint.key,
-    x,
-    y,
-    data: createBlueprintDataDefaults(blueprint),
+    data: {
+      ...createBlueprintDataDefaults(blueprint),
+      x,
+      y,
+    },
     runtime: {
       components: {},
       eventQueue: [],
@@ -52,16 +56,17 @@ export function createNode(id, x = 0, y = 0, type = DEFAULT_BLUEPRINT_KEY) {
 function normalizeNode(node) {
   const blueprint = getBlueprint(node?.type);
   const data = node?.data && typeof node.data === "object" ? { ...node.data } : {};
+  const normalizedData = {
+    ...createBlueprintDataDefaults(blueprint),
+    ...data,
+    x: Number(data.x) || 0,
+    y: Number(data.y) || 0,
+    messages: Array.isArray(data.messages) ? data.messages : [],
+  };
   return {
     id: Number(node.id),
     type: blueprint.key,
-    x: Number(node.x) || 0,
-    y: Number(node.y) || 0,
-    data: {
-      ...createBlueprintDataDefaults(blueprint),
-      ...data,
-      messages: Array.isArray(data.messages) ? data.messages : [],
-    },
+    data: normalizedData,
     runtime: {
       components:
         node?.runtime?.components && typeof node.runtime.components === "object"
@@ -134,6 +139,13 @@ export function getNodeSummary(node) {
 
 export function getNodeMessages(node) {
   return Array.isArray(node?.data?.messages) ? node.data.messages : [];
+}
+
+export function getNodePosition(node) {
+  return {
+    x: Number(node?.data?.x) || 0,
+    y: Number(node?.data?.y) || 0,
+  };
 }
 
 export function getCanvasNodeSummary(node) {

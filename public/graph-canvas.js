@@ -1,4 +1,4 @@
-import { getCanvasNodeSummary } from "./graph-model.js";
+import { getCanvasNodeSummary, getNodePosition } from "./graph-model.js";
 
 export const GRAPH_CANVAS_THEME = {
   nodeWidth: 220,
@@ -150,10 +150,11 @@ export function createGraphCanvas(
       const summaryRows = truncateRows(getCanvasNodeSummary(node), 18, 3);
       const width = GRAPH_CANVAS_THEME.nodeWidth;
       const height = Math.max(GRAPH_CANVAS_THEME.nodeMinHeight, 46 + summaryRows.length * 18);
+      const position = getNodePosition(node);
 
       layout.set(node.id, {
-        x: node.x || 0,
-        y: node.y || 0,
+        x: position.x,
+        y: position.y,
         width,
         height,
         summaryRows,

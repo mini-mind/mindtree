@@ -146,8 +146,6 @@ export function serializeRuntimelessGraph(graph) {
     nodes: graph.nodes.map((node) => ({
       id: node.id,
       type: node.type,
-      x: node.x || 0,
-      y: node.y || 0,
       data: node.data && typeof node.data === "object" ? { ...node.data } : createComponentBag(),
       plugins: Array.isArray(node.plugins)
         ? node.plugins.map((plugin) => ({
