@@ -12,6 +12,10 @@ const MINIMAP_THEME = {
   padding: 12,
 };
 
+const DOUBLE_TAP_DELAY = 320;
+const DRAG_THRESHOLD = 8;
+const LONG_PRESS_DELAY = 420;
+
 function roundRect(context, x, y, width, height, radius) {
   context.beginPath();
   context.moveTo(x + radius, y);
@@ -20,6 +24,17 @@ function roundRect(context, x, y, width, height, radius) {
   context.arcTo(x, y + height, x, y, radius);
   context.arcTo(x, y, x + width, y, radius);
   context.closePath();
+}
+
+function getDistance(pointA, pointB) {
+  return Math.hypot(pointA.clientX - pointB.clientX, pointA.clientY - pointB.clientY);
+}
+
+function getCenter(pointA, pointB) {
+  return {
+    x: (pointA.clientX + pointB.clientX) / 2,
+    y: (pointA.clientY + pointB.clientY) / 2,
+  };
 }
 
 export function createGraphCanvas(
@@ -35,7 +50,6 @@ export function createGraphCanvas(
   }
 ) {
   const ctx = canvas.getContext("2d");
-  const contextMenuDragThreshold = 8;
   const animation = {
     frameId: null,
   };
@@ -51,12 +65,21 @@ export function createGraphCanvas(
     contextMenuCandidate: null,
     selectionBox: null,
   };
+  const touchState = {
+    primary: null,
+    pinch: null,
+    longPressTimer: null,
+  };
+  const minimapState = {
+    region: null,
+    dragging: false,
+  };
   let hitRegions = [];
   let currentGraph = null;
   let currentSelectedId = null;
   let currentSelectedIds = [];
-  let lastHitId = null;
-  let lastHitAt = 0;
+  let lastTapId = null;
+  let lastTapAt = 0;
   let draggingNodeId = null;
 
   function beginSelectionBox(x, y) {
@@ -188,6 +211,178 @@ export function createGraphCanvas(
     );
   }
 
+  function getHitRegionAt(x, y) {
+    return hitRegions.find(
+      (region) => x >= region.x && x <= region.x + region.width && y >= region.y && y <= region.y + region.height
+    );
+  }
+
+  function isPastDragThreshold(deltaX, deltaY) {
+    return Math.abs(deltaX) > DRAG_THRESHOLD || Math.abs(deltaY) > DRAG_THRESHOLD;
+  }
+
+  function clearLongPressTimer() {
+    if (touchState.longPressTimer !== null) {
+      window.clearTimeout(touchState.longPressTimer);
+      touchState.longPressTimer = null;
+    }
+  }
+
+  function scheduleLongPress(callback) {
+    clearLongPressTimer();
+    touchState.longPressTimer = window.setTimeout(() => {
+      touchState.longPressTimer = null;
+      callback();
+    }, LONG_PRESS_DELAY);
+  }
+
+  function clearTouchState() {
+    clearLongPressTimer();
+    touchState.primary = null;
+    touchState.pinch = null;
+  }
+
+  function finishSelectionBox() {
+    if (!pointerState.selectionBox) {
+      return;
+    }
+
+    const selectionBox = pointerState.selectionBox;
+    pointerState.selectionBox = null;
+
+    if (!selectionBox.moved) {
+      draw();
+      return;
+    }
+
+    const left = Math.min(selectionBox.startX, selectionBox.currentX);
+    const right = Math.max(selectionBox.startX, selectionBox.currentX);
+    const top = Math.min(selectionBox.startY, selectionBox.currentY);
+    const bottom = Math.max(selectionBox.startY, selectionBox.currentY);
+    const selectedIds = hitRegions
+      .filter(
+        (region) =>
+          region.x < right &&
+          region.x + region.width > left &&
+          region.y < bottom &&
+          region.y + region.height > top
+      )
+      .map((region) => region.id);
+
+    if (selectedIds.length) {
+      onNodesSelect?.(selectedIds);
+    } else {
+      onBackgroundSelect();
+    }
+  }
+
+  function translateCanvas(deltaX, deltaY) {
+    view.offsetX += deltaX;
+    view.offsetY += deltaY;
+    draw();
+  }
+
+  function centerViewportAtWorldPoint(worldX, worldY) {
+    view.offsetX = window.innerWidth / 2 - worldX * view.scale;
+    view.offsetY = window.innerHeight / 2 - worldY * view.scale;
+    draw();
+  }
+
+  function applyScaleAtPoint(nextScale, clientX, clientY) {
+    const clampedScale = Math.min(1.8, Math.max(0.45, nextScale));
+    const worldPoint = screenToWorld(clientX, clientY);
+    view.scale = clampedScale;
+    view.offsetX = clientX - worldPoint.x * view.scale;
+    view.offsetY = clientY - worldPoint.y * view.scale;
+    draw();
+  }
+
+  function registerNodeTap(nodeId) {
+    onNodeSelect(nodeId);
+
+    const now = Date.now();
+    if (lastTapId === nodeId && now - lastTapAt < DOUBLE_TAP_DELAY) {
+      onNodeOpen(nodeId);
+    }
+
+    lastTapId = nodeId;
+    lastTapAt = now;
+  }
+
+  function getMinimapTheme(width, height) {
+    if (width <= 640 || height <= 720) {
+      return {
+        width: 144,
+        height: 102,
+        margin: 14,
+        padding: 9,
+      };
+    }
+
+    return MINIMAP_THEME;
+  }
+
+  function getMinimapHitAt(x, y) {
+    const region = minimapState.region;
+    if (!region) {
+      return null;
+    }
+
+    const withinCard =
+      x >= region.cardX &&
+      x <= region.cardX + region.cardWidth &&
+      y >= region.cardY &&
+      y <= region.cardY + region.cardHeight;
+
+    if (!withinCard) {
+      return null;
+    }
+
+    const withinViewport =
+      x >= region.viewportX &&
+      x <= region.viewportX + region.viewportWidth &&
+      y >= region.viewportY &&
+      y <= region.viewportY + region.viewportHeight;
+
+    const withinContent =
+      x >= region.contentX &&
+      x <= region.contentX + region.contentWidth &&
+      y >= region.contentY &&
+      y <= region.contentY + region.contentHeight;
+
+    if (withinViewport) {
+      return "viewport";
+    }
+
+    if (withinContent) {
+      return "content";
+    }
+
+    return "card";
+  }
+
+  function centerViewportFromMinimapPoint(clientX, clientY) {
+    const region = minimapState.region;
+    if (!region) {
+      return;
+    }
+
+    const clampedX = Math.min(Math.max(clientX, region.offsetX), region.offsetX + region.mapWidth);
+    const clampedY = Math.min(Math.max(clientY, region.offsetY), region.offsetY + region.mapHeight);
+    const worldX = region.bounds.minX + (clampedX - region.offsetX) / region.scale;
+    const worldY = region.bounds.minY + (clampedY - region.offsetY) / region.scale;
+    centerViewportAtWorldPoint(worldX, worldY);
+  }
+
+  function startMinimapDrag(clientX, clientY) {
+    minimapState.dragging = true;
+    centerViewportFromMinimapPoint(clientX, clientY);
+  }
+
+  function stopMinimapDrag() {
+    minimapState.dragging = false;
+  }
+
   function drawGrid(width, height) {
     const gap = 48 * view.scale;
     ctx.save();
@@ -286,17 +481,19 @@ export function createGraphCanvas(
     const viewportBounds = getViewportBounds(width, height);
     const bounds = mergeBounds([contentBounds, viewportBounds]);
     if (!bounds) {
+      minimapState.region = null;
       return;
     }
 
-    const cardWidth = MINIMAP_THEME.width;
-    const cardHeight = MINIMAP_THEME.height;
-    const cardX = width - cardWidth - MINIMAP_THEME.margin;
-    const cardY = height - cardHeight - MINIMAP_THEME.margin;
-    const contentX = cardX + MINIMAP_THEME.padding;
-    const contentY = cardY + MINIMAP_THEME.padding;
-    const contentWidth = cardWidth - MINIMAP_THEME.padding * 2;
-    const contentHeight = cardHeight - MINIMAP_THEME.padding * 2;
+    const theme = getMinimapTheme(width, height);
+    const cardWidth = theme.width;
+    const cardHeight = theme.height;
+    const cardX = width - cardWidth - theme.margin;
+    const cardY = height - cardHeight - theme.margin;
+    const contentX = cardX + theme.padding;
+    const contentY = cardY + theme.padding;
+    const contentWidth = cardWidth - theme.padding * 2;
+    const contentHeight = cardHeight - theme.padding * 2;
     const boundsWidth = Math.max(1, bounds.maxX - bounds.minX);
     const boundsHeight = Math.max(1, bounds.maxY - bounds.minY);
     const scale = Math.min(contentWidth / boundsWidth, contentHeight / boundsHeight);
@@ -338,6 +535,27 @@ export function createGraphCanvas(
     const viewportWidth = (viewportBounds.maxX - viewportBounds.minX) * scale;
     const viewportHeight = (viewportBounds.maxY - viewportBounds.minY) * scale;
 
+    minimapState.region = {
+      cardX,
+      cardY,
+      cardWidth,
+      cardHeight,
+      contentX,
+      contentY,
+      contentWidth,
+      contentHeight,
+      offsetX,
+      offsetY,
+      mapWidth,
+      mapHeight,
+      scale,
+      bounds,
+      viewportX,
+      viewportY,
+      viewportWidth,
+      viewportHeight,
+    };
+
     ctx.fillStyle = "rgba(166, 123, 53, 0.08)";
     ctx.strokeStyle = "rgba(166, 123, 53, 0.42)";
     ctx.lineWidth = 1;
@@ -352,6 +570,7 @@ export function createGraphCanvas(
     ctx.clearRect(0, 0, width, height);
     drawGrid(width, height);
     hitRegions = [];
+    minimapState.region = null;
 
     if (!currentGraph?.nodes.length) {
       return;
@@ -390,14 +609,55 @@ export function createGraphCanvas(
     draw();
   }
 
+  function startPinchGesture(touchA, touchB) {
+    clearLongPressTimer();
+    pointerState.selectionBox = null;
+    draggingNodeId = null;
+    view.draggingCanvas = false;
+
+    const center = getCenter(touchA, touchB);
+    touchState.primary = null;
+    touchState.pinch = {
+      startDistance: Math.max(1, getDistance(touchA, touchB)),
+      startScale: view.scale,
+      worldCenter: screenToWorld(center.x, center.y),
+    };
+  }
+
+  function updatePinchGesture(touchA, touchB) {
+    if (!touchState.pinch) {
+      return;
+    }
+
+    const center = getCenter(touchA, touchB);
+    const distance = Math.max(1, getDistance(touchA, touchB));
+    const nextScale = touchState.pinch.startScale * (distance / touchState.pinch.startDistance);
+    view.scale = Math.min(1.8, Math.max(0.45, nextScale));
+    view.offsetX = center.x - touchState.pinch.worldCenter.x * view.scale;
+    view.offsetY = center.y - touchState.pinch.worldCenter.y * view.scale;
+    draw();
+  }
+
   canvas.addEventListener("pointerdown", (event) => {
-    const hit = hitRegions.find(
-      (region) =>
-        event.clientX >= region.x &&
-        event.clientX <= region.x + region.width &&
-        event.clientY >= region.y &&
-        event.clientY <= region.y + region.height
-    );
+    if (event.pointerType === "touch") {
+      return;
+    }
+
+    const minimapHit = getMinimapHitAt(event.clientX, event.clientY);
+    if (minimapHit) {
+      event.preventDefault();
+      event.stopPropagation();
+      pointerState.contextMenuCandidate = null;
+      pointerState.selectionBox = null;
+      draggingNodeId = null;
+      view.draggingCanvas = false;
+      if (event.button === 0 && minimapHit !== "card") {
+        startMinimapDrag(event.clientX, event.clientY);
+      }
+      return;
+    }
+
+    const hit = getHitRegionAt(event.clientX, event.clientY);
 
     if (event.button === 2) {
       event.preventDefault();
@@ -426,25 +686,26 @@ export function createGraphCanvas(
       return;
     }
 
-    onNodeSelect(hit.id);
+    registerNodeTap(hit.id);
     draggingNodeId = hit.id;
     view.lastX = event.clientX;
     view.lastY = event.clientY;
-    const now = Date.now();
-    if (lastHitId === hit.id && now - lastHitAt < 320) {
-      onNodeOpen(hit.id);
-    }
-    lastHitId = hit.id;
-    lastHitAt = now;
   });
 
   canvas.addEventListener("pointermove", (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+
+    if (minimapState.dragging) {
+      centerViewportFromMinimapPoint(event.clientX, event.clientY);
+      return;
+    }
+
     if (pointerState.contextMenuCandidate) {
       const deltaX = event.clientX - pointerState.contextMenuCandidate.startX;
       const deltaY = event.clientY - pointerState.contextMenuCandidate.startY;
-      const movedFarEnough =
-        Math.abs(deltaX) > contextMenuDragThreshold ||
-        Math.abs(deltaY) > contextMenuDragThreshold;
+      const movedFarEnough = isPastDragThreshold(deltaX, deltaY);
 
       if (movedFarEnough) {
         pointerState.contextMenuCandidate.moved = true;
@@ -477,41 +738,23 @@ export function createGraphCanvas(
       return;
     }
 
-    view.offsetX += event.clientX - view.lastX;
-    view.offsetY += event.clientY - view.lastY;
+    translateCanvas(event.clientX - view.lastX, event.clientY - view.lastY);
     view.lastX = event.clientX;
     view.lastY = event.clientY;
-    draw();
   });
 
   canvas.addEventListener("pointerup", (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+
+    if (minimapState.dragging) {
+      stopMinimapDrag();
+      return;
+    }
+
     if (event.button === 0 && pointerState.selectionBox) {
-      const selectionBox = pointerState.selectionBox;
-      pointerState.selectionBox = null;
-
-      if (selectionBox.moved) {
-        const left = Math.min(selectionBox.startX, selectionBox.currentX);
-        const right = Math.max(selectionBox.startX, selectionBox.currentX);
-        const top = Math.min(selectionBox.startY, selectionBox.currentY);
-        const bottom = Math.max(selectionBox.startY, selectionBox.currentY);
-        const selectedIds = hitRegions
-          .filter(
-            (region) =>
-              region.x < right &&
-              region.x + region.width > left &&
-              region.y < bottom &&
-              region.y + region.height > top
-          )
-          .map((region) => region.id);
-
-        if (selectedIds.length) {
-          onNodesSelect?.(selectedIds);
-        } else {
-          onBackgroundSelect();
-        }
-      } else {
-        draw();
-      }
+      finishSelectionBox();
     }
 
     if (event.button === 2 && pointerState.contextMenuCandidate) {
@@ -533,12 +776,195 @@ export function createGraphCanvas(
     draggingNodeId = null;
   });
 
-  canvas.addEventListener("pointerleave", () => {
+  canvas.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+
+    stopMinimapDrag();
     pointerState.contextMenuCandidate = null;
     pointerState.selectionBox = null;
     view.draggingCanvas = false;
     draggingNodeId = null;
   });
+
+  canvas.addEventListener("touchstart", (event) => {
+    event.preventDefault();
+
+    if (event.touches.length === 2) {
+      startPinchGesture(event.touches[0], event.touches[1]);
+      return;
+    }
+
+    if (event.touches.length > 2) {
+      clearTouchState();
+      return;
+    }
+
+    const touch = event.touches[0];
+    const minimapHit = getMinimapHitAt(touch.clientX, touch.clientY);
+    if (minimapHit && minimapHit !== "card") {
+      clearTouchState();
+      touchState.primary = {
+        identifier: touch.identifier,
+        hitId: null,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        lastX: touch.clientX,
+        lastY: touch.clientY,
+        mode: "minimap-drag",
+      };
+      startMinimapDrag(touch.clientX, touch.clientY);
+      return;
+    }
+
+    const hit = getHitRegionAt(touch.clientX, touch.clientY);
+    touchState.primary = {
+      identifier: touch.identifier,
+      hitId: hit?.id ?? null,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+      mode: hit ? "node-pending" : "background-pending",
+    };
+
+    if (hit) {
+      scheduleLongPress(() => {
+        if (!touchState.primary || touchState.primary.hitId !== hit.id || touchState.pinch) {
+          return;
+        }
+
+        touchState.primary.mode = "node-menu";
+        onNodeContextMenu?.(hit.id, {
+          x: touchState.primary.lastX,
+          y: touchState.primary.lastY,
+        });
+      });
+      return;
+    }
+
+    scheduleLongPress(() => {
+      if (!touchState.primary || touchState.primary.hitId !== null || touchState.pinch) {
+        return;
+      }
+
+      touchState.primary.mode = "background-hold";
+    });
+  }, { passive: false });
+
+  canvas.addEventListener("touchmove", (event) => {
+    event.preventDefault();
+
+    if (event.touches.length === 2) {
+      if (!touchState.pinch) {
+        startPinchGesture(event.touches[0], event.touches[1]);
+      }
+      updatePinchGesture(event.touches[0], event.touches[1]);
+      return;
+    }
+
+    if (!touchState.primary || touchState.pinch) {
+      return;
+    }
+
+    const touch = [...event.touches].find((item) => item.identifier === touchState.primary.identifier);
+    if (!touch) {
+      return;
+    }
+
+    const totalDeltaX = touch.clientX - touchState.primary.startX;
+    const totalDeltaY = touch.clientY - touchState.primary.startY;
+    const movedFarEnough = isPastDragThreshold(totalDeltaX, totalDeltaY);
+
+    if (touchState.primary.mode === "minimap-drag") {
+      centerViewportFromMinimapPoint(touch.clientX, touch.clientY);
+      touchState.primary.lastX = touch.clientX;
+      touchState.primary.lastY = touch.clientY;
+      return;
+    }
+
+    if (touchState.primary.mode === "node-pending" && movedFarEnough) {
+      clearLongPressTimer();
+      touchState.primary.mode = "node-drag";
+      onNodeSelect?.(touchState.primary.hitId);
+    }
+
+    if (touchState.primary.mode === "background-pending" && movedFarEnough) {
+      clearLongPressTimer();
+      touchState.primary.mode = "canvas-pan";
+    }
+
+    if (touchState.primary.mode === "background-hold" && movedFarEnough) {
+      beginSelectionBox(touchState.primary.startX, touchState.primary.startY);
+      onBackgroundSelect?.();
+      touchState.primary.mode = "selection";
+    }
+
+    if (touchState.primary.mode === "node-drag") {
+      const deltaX = (touch.clientX - touchState.primary.lastX) / view.scale;
+      const deltaY = (touch.clientY - touchState.primary.lastY) / view.scale;
+      onNodeMove?.(touchState.primary.hitId, deltaX, deltaY);
+    } else if (touchState.primary.mode === "canvas-pan") {
+      translateCanvas(touch.clientX - touchState.primary.lastX, touch.clientY - touchState.primary.lastY);
+    } else if (touchState.primary.mode === "selection" && pointerState.selectionBox) {
+      pointerState.selectionBox.currentX = touch.clientX;
+      pointerState.selectionBox.currentY = touch.clientY;
+      pointerState.selectionBox.moved =
+        Math.abs(pointerState.selectionBox.currentX - pointerState.selectionBox.startX) > 6 ||
+        Math.abs(pointerState.selectionBox.currentY - pointerState.selectionBox.startY) > 6;
+      draw();
+    }
+
+    touchState.primary.lastX = touch.clientX;
+    touchState.primary.lastY = touch.clientY;
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", (event) => {
+    event.preventDefault();
+
+    if (touchState.pinch && event.touches.length < 2) {
+      touchState.pinch = null;
+    }
+
+    if (!touchState.primary) {
+      return;
+    }
+
+    const endedPrimary = [...event.changedTouches].some(
+      (touch) => touch.identifier === touchState.primary.identifier
+    );
+    if (!endedPrimary) {
+      return;
+    }
+
+    clearLongPressTimer();
+
+    if (touchState.primary.mode === "minimap-drag") {
+      stopMinimapDrag();
+    } else if (touchState.primary.mode === "node-pending") {
+      registerNodeTap(touchState.primary.hitId);
+    } else if (touchState.primary.mode === "background-pending") {
+      onBackgroundSelect?.();
+    } else if (touchState.primary.mode === "background-hold") {
+      onBackgroundContextMenu?.({
+        x: touchState.primary.lastX,
+        y: touchState.primary.lastY,
+      });
+    } else if (touchState.primary.mode === "selection") {
+      finishSelectionBox();
+    }
+
+    touchState.primary = null;
+    draw();
+  }, { passive: false });
+
+  canvas.addEventListener("touchcancel", () => {
+    clearTouchState();
+    stopMinimapDrag();
+    pointerState.selectionBox = null;
+    draw();
+  }, { passive: false });
 
   canvas.addEventListener("contextmenu", (event) => {
     event.preventDefault();
@@ -549,12 +975,7 @@ export function createGraphCanvas(
     (event) => {
       event.preventDefault();
       const delta = event.deltaY < 0 ? 1.08 : 0.92;
-      const nextScale = Math.min(1.8, Math.max(0.45, view.scale * delta));
-      const cursor = screenToWorld(event.clientX, event.clientY);
-      view.scale = nextScale;
-      view.offsetX = event.clientX - cursor.x * view.scale;
-      view.offsetY = event.clientY - cursor.y * view.scale;
-      draw();
+      applyScaleAtPoint(view.scale * delta, event.clientX, event.clientY);
     },
     { passive: false }
   );

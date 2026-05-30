@@ -6,6 +6,12 @@ const { createApp } = require("../server-app");
 
 const CHROME_PATH = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function createJsonResponse(status, payload) {
   return {
     ok: status >= 200 && status < 300,
@@ -58,6 +64,114 @@ async function openNodeByDoubleClick(page, nodeId) {
   const y = box.y + box.height / 2;
   await page.mouse.click(x, y);
   await page.mouse.click(x, y);
+}
+
+async function getNodeCenter(page, nodeId) {
+  await page.waitForFunction(
+    (id) => {
+      const box = window.__mindzooTestApi?.getNodeScreenBox(id);
+      return box && box.width > 0 && box.height > 0;
+    },
+    {},
+    nodeId
+  );
+  const box = await page.evaluate((id) => window.__mindzooTestApi.getNodeScreenBox(id), nodeId);
+  assert.ok(box, `missing node screen box for node ${nodeId}`);
+  return {
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2,
+  };
+}
+
+async function dispatchTouch(page, type, touches) {
+  await page.evaluate(
+    ({ type: eventType, touches: pointList }) => {
+      const canvas = document.getElementById("graph-canvas");
+      const targetTouches = pointList.map((point) => {
+        return new Touch({
+          identifier: point.identifier,
+          target: canvas,
+          clientX: point.x,
+          clientY: point.y,
+          pageX: point.x,
+          pageY: point.y,
+          screenX: point.x,
+          screenY: point.y,
+          radiusX: 8,
+          radiusY: 8,
+          rotationAngle: 0,
+          force: 0.5,
+        });
+      });
+      const changedTouches = targetTouches;
+      const touchEvent = new TouchEvent(eventType, {
+        bubbles: true,
+        cancelable: true,
+        touches: eventType === "touchend" || eventType === "touchcancel" ? [] : targetTouches,
+        targetTouches:
+          eventType === "touchend" || eventType === "touchcancel" ? [] : targetTouches,
+        changedTouches,
+      });
+      canvas.dispatchEvent(touchEvent);
+    },
+    { type, touches }
+  );
+}
+
+async function touchTap(page, x, y, identifier = 1) {
+  await dispatchTouch(page, "touchstart", [{ x, y, identifier }]);
+  await dispatchTouch(page, "touchend", [{ x, y, identifier }]);
+}
+
+async function touchDoubleTap(page, x, y) {
+  await touchTap(page, x, y, 11);
+  await sleep(80);
+  await touchTap(page, x, y, 12);
+}
+
+async function touchLongPress(page, x, y, holdMs = 520, identifier = 21) {
+  await dispatchTouch(page, "touchstart", [{ x, y, identifier }]);
+  await sleep(holdMs);
+  await dispatchTouch(page, "touchend", [{ x, y, identifier }]);
+}
+
+async function touchDrag(page, start, end, identifier = 31, steps = 8) {
+  await dispatchTouch(page, "touchstart", [{ x: start.x, y: start.y, identifier }]);
+  for (let index = 1; index <= steps; index += 1) {
+    const progress = index / steps;
+    await dispatchTouch(page, "touchmove", [
+      {
+        x: start.x + (end.x - start.x) * progress,
+        y: start.y + (end.y - start.y) * progress,
+        identifier,
+      },
+    ]);
+  }
+  await dispatchTouch(page, "touchend", [{ x: end.x, y: end.y, identifier }]);
+}
+
+async function getMinimapGeometry(page) {
+  return page.evaluate(() => {
+    const canvas = document.getElementById("graph-canvas");
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const mobile = width <= 640 || height <= 720;
+    const theme = mobile
+      ? { width: 144, height: 102, margin: 14, padding: 9 }
+      : { width: 196, height: 132, margin: 20, padding: 12 };
+
+    return {
+      cardX: width - theme.width - theme.margin,
+      cardY: height - theme.height - theme.margin,
+      cardWidth: theme.width,
+      cardHeight: theme.height,
+      contentX: width - theme.width - theme.margin + theme.padding,
+      contentY: height - theme.height - theme.margin + theme.padding,
+      contentWidth: theme.width - theme.padding * 2,
+      contentHeight: theme.height - theme.padding * 2,
+      canvasTag: canvas.tagName,
+    };
+  });
 }
 
 test("UI flow covers help, config, graph defaults, and context menus", async () => {
@@ -159,6 +273,81 @@ test("UI supports marquee selection and batch delete", async () => {
 
     const graph = await readStoredGraph(page);
     assert.equal(graph.nodes.length, 1);
+  } finally {
+    await browser.close();
+    server.close();
+  }
+});
+
+test("UI minimap supports click and drag navigation", async () => {
+  const app = createApp({
+    fetchImpl: async () => createJsonResponse(200, { choices: [] }),
+  });
+  const server = app.listen(0);
+  await once(server, "listening");
+  const { port } = server.address();
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: "new",
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${port}/?test=1`, { waitUntil: "networkidle0" });
+    await seedGraph(page, {
+      nodes: [
+        { id: 1, type: "note", x: 0, y: 0, data: { summary: "起点", messages: [] } },
+        { id: 2, type: "note", x: 1800, y: 1200, data: { summary: "远端节点", messages: [] } },
+      ],
+    });
+
+    const geometry = await getMinimapGeometry(page);
+    await page.mouse.click(
+      geometry.contentX + geometry.contentWidth * 0.9,
+      geometry.contentY + geometry.contentHeight * 0.9
+    );
+
+    await page.waitForFunction(
+      () => {
+        const box = window.__mindzooTestApi?.getNodeScreenBox(2);
+        return box && box.x < window.innerWidth && box.y < window.innerHeight;
+      },
+      { timeout: 2000 }
+    );
+
+    const viewport = await page.viewport();
+    const nearCenterBox = await page.evaluate(() => window.__mindzooTestApi.getNodeScreenBox(2));
+    assert.ok(nearCenterBox.x > viewport.width * 0.3);
+    assert.ok(nearCenterBox.y > viewport.height * 0.2);
+
+    const dragStart = {
+      x: geometry.contentX + geometry.contentWidth * 0.75,
+      y: geometry.contentY + geometry.contentHeight * 0.75,
+    };
+    const dragEnd = {
+      x: geometry.contentX + geometry.contentWidth * 0.25,
+      y: geometry.contentY + geometry.contentHeight * 0.25,
+    };
+
+    const rootBoxBeforeDrag = await page.evaluate(() => window.__mindzooTestApi.getNodeScreenBox(1));
+    await page.mouse.move(dragStart.x, dragStart.y);
+    await page.mouse.down();
+    await page.mouse.move(dragEnd.x, dragEnd.y, { steps: 8 });
+    await page.mouse.up();
+
+    await page.waitForFunction(
+      () => {
+        const box = window.__mindzooTestApi?.getNodeScreenBox(1);
+        return box && box.x < window.innerWidth && box.y < window.innerHeight;
+      },
+      { timeout: 2000 }
+    );
+
+    const rootBox = await page.evaluate(() => window.__mindzooTestApi.getNodeScreenBox(1));
+    assert.ok(rootBox.x > rootBoxBeforeDrag.x + 120);
+    assert.ok(rootBox.y > rootBoxBeforeDrag.y + 80);
   } finally {
     await browser.close();
     server.close();
@@ -378,6 +567,67 @@ test("UI can create and run an agent node through the node dialog", async () => 
     assert.equal(updatedAgentNode.data.summary, "研究 Agent");
     assert.equal(updatedAgentNode.data.messages.length, 2);
     assert.equal(updatedAgentNode.data.messages[1].agent, "assistant");
+  } finally {
+    await browser.close();
+    server.close();
+  }
+});
+
+test("UI supports mobile touch interactions for create, open, and move", async () => {
+  const app = createApp({
+    fetchImpl: async () => createJsonResponse(200, { choices: [] }),
+  });
+  const server = app.listen(0);
+  await once(server, "listening");
+  const { port } = server.address();
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: "new",
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({
+      width: 430,
+      height: 932,
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    });
+    await page.goto(`http://127.0.0.1:${port}/?test=1`, { waitUntil: "networkidle0" });
+
+    await touchLongPress(page, 180, 500);
+    await page.waitForSelector("#canvas-context-menu:not([hidden])");
+    await page.$eval("#context-add-node", (button) => button.click());
+    await confirmDefaultCreateNode(page);
+
+    const graphAfterCreate = await readStoredGraph(page);
+    assert.equal(graphAfterCreate.nodes.length, 2);
+
+    const newNodeId = Math.max(...graphAfterCreate.nodes.map((node) => node.id));
+    const center = await getNodeCenter(page, newNodeId);
+
+    await touchDoubleTap(page, center.x, center.y);
+    await page.waitForSelector("#node-dialog[open]");
+    await page.$eval("#close-node-dialog", (button) => button.click());
+    await page.waitForSelector("#node-dialog:not([open])");
+
+    const beforeMove = graphAfterCreate.nodes.find((node) => node.id === newNodeId);
+    await touchDrag(
+      page,
+      center,
+      {
+        x: center.x + 80,
+        y: center.y + 60,
+      }
+    );
+
+    const graphAfterMove = await readStoredGraph(page);
+    const movedNode = graphAfterMove.nodes.find((node) => node.id === newNodeId);
+    assert.ok(movedNode.x > beforeMove.x + 20);
+    assert.ok(movedNode.y > beforeMove.y + 20);
   } finally {
     await browser.close();
     server.close();
