@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const { MODEL_CAPABILITIES } = require("../model-capabilities");
 const { runNodeAgent } = require("./agent-service");
 const { buildDefaultConfigResponse } = require("./config");
 const { mapApiError } = require("./errors");
@@ -34,7 +35,7 @@ function createApp({ fetchImpl = fetch } = {}) {
       });
       res.json(result);
     } catch (error) {
-      const mapped = mapApiError(error, defaultConfigResponse.knownModels);
+      const mapped = mapApiError(error, Object.keys(MODEL_CAPABILITIES));
       res.status(mapped.statusCode).json(mapped.body);
     }
   });

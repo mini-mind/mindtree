@@ -1,5 +1,5 @@
 {
-  "name": "mindtree",
+  "name": "mindzoo",
   "version": "1.0.0",
   "description": "Directed graph workspace with extensible node agents",
   "main": "server.js",

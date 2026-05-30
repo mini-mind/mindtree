@@ -4,5 +4,5 @@ const port = process.env.PORT || 3100;
 const app = createApp();
 
 app.listen(port, host, () => {
-  console.log(`mindgraph server listening on http://${host}:${port}`);
+  console.log(`mindzoo server listening on http://${host}:${port}`);
 });

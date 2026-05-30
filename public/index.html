@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MindGraph</title>
+    <title>Mindzoo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -36,8 +36,8 @@
       <div class="floating-shell">
         <div class="brand-chip">
           <div>
-            <p class="eyebrow">Directed Graph Workspace</p>
-            <h1>MindGraph</h1>
+            <p class="eyebrow">Node Workspace</p>
+            <h1>Mindzoo</h1>
           </div>
         </div>
 
@@ -76,7 +76,7 @@
           </div>
           <div class="help-item">
             <p class="section-title">节点使用</p>
-            <p>单击节点选中，双击节点打开节点对话框，查看当前节点的历史记录与 agent 反馈。</p>
+            <p>单击节点选中，双击节点打开节点对话框，查看当前节点的历史记录、任务项和节点内部维护的连接信息。</p>
           </div>
           <div class="help-item">
             <p class="section-title">节点记录</p>
@@ -222,51 +222,6 @@
 
         <div class="actions actions-end">
           <button id="confirm-create-node" type="button" class="primary-button">创建</button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog id="create-edge-dialog" class="config-dialog">
-      <form method="dialog" class="config-card create-node-card">
-        <div class="config-head">
-          <div>
-            <p class="eyebrow">Create Edge</p>
-            <h2 id="create-edge-title">创建连接</h2>
-          </div>
-          <button
-            id="close-create-edge-dialog"
-            value="cancel"
-            class="ghost-button icon-button"
-            aria-label="关闭创建连接"
-          >
-            <span aria-hidden="true">×</span>
-          </button>
-        </div>
-
-        <div class="config-section">
-          <p class="section-title">关系类型</p>
-          <div id="create-edge-type-list" class="option-list"></div>
-        </div>
-
-        <label class="field">
-          <span>标签</span>
-          <input id="create-edge-label" type="text" maxlength="120" placeholder="可选的关系说明" />
-        </label>
-
-        <label class="field">
-          <span>备注</span>
-          <textarea
-            id="create-edge-note"
-            rows="4"
-            maxlength="500"
-            placeholder="可选的附加信息"
-          ></textarea>
-        </label>
-
-        <p id="create-edge-description" class="config-hint">选择关系类型并填写可选属性后创建。</p>
-
-        <div class="actions actions-end">
-          <button id="confirm-create-edge" type="button" class="primary-button">创建连接</button>
         </div>
       </form>
     </dialog>

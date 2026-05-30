@@ -15,14 +15,14 @@ function formatNode(node, index = null) {
   return `${index + 1}. ${content}`.trim();
 }
 
-function formatRelations(relations = []) {
-  return relations
-    .map((relation, index) => `${index + 1}. [${relation.type}] ${formatNode(relation.node)}`.trim())
+function formatLinkedNodes(linkedNodes = []) {
+  return linkedNodes
+    .map((linkedNode, index) => `${index + 1}. [${linkedNode.type}] ${formatNode(linkedNode.node)}`.trim())
     .join("\n\n");
 }
 
 module.exports = {
   formatMessages,
   formatNode,
-  formatRelations,
+  formatLinkedNodes,
 };

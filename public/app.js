@@ -1,33 +1,32 @@
 import {
   clearStoredGraph,
   getLocalFallbackConfig,
-  loadStoredConfig,
   loadGraph,
+  loadStoredConfig,
   saveConfig,
   saveGraph,
 } from "./config-store.js";
 import {
-  addGraphEdge,
   addGraphNode,
-  createEdge,
-  createMessage,
   createInitialGraphDocument,
+  createMessage,
   createNode,
   deleteNodeFromGraph,
-  findNodeInGraph,
+  getMaxGraphId,
+  getNodeById,
+  getNodeConnections,
   getNodeMessages,
   getNodeSummary,
-  getMaxGraphEdgeId,
-  getMaxGraphId,
   normalizeGraph,
   setNodeMessages,
   setNodeSummary,
 } from "./graph-model.js";
+import { extractGraphContext } from "./graph-context.js";
+import { GraphValidationError } from "./graph-validation.js";
+import { createGraphCanvas, GRAPH_CANVAS_THEME } from "./graph-canvas.js";
+import { buildInitialConfig, createLlmConfigController } from "./llm-config-ui.js";
 import {
-  buildInitialConfig,
-  createLlmConfigController,
-} from "./llm-config-ui.js";
-import {
+  describeNodeConnection,
   getNodeDialogStatus,
   getNodeDialogTitle,
   getNodeMessageLabel,
@@ -36,14 +35,9 @@ import {
   listNodeTypes,
   setTaskBoardItems,
 } from "./node-types.js";
-import { DEFAULT_EDGE_TYPE, listEdgeTypes } from "./edge-types.js";
-import { extractGraphContext } from "./graph-context.js";
-import { GraphValidationError } from "./graph-validation.js";
-import { createGraphCanvas, GRAPH_CANVAS_THEME } from "./graph-canvas.js";
 
-const AGENT_DEFINITIONS = [
-  { key: "assistant", label: "Assistant" },
-];
+const AGENT_DEFINITIONS = [{ key: "assistant", label: "Assistant" }];
+const isTestMode = new URLSearchParams(window.location.search).has("test");
 
 const canvas = document.getElementById("graph-canvas");
 
@@ -80,17 +74,10 @@ const elements = {
   createNodeTypeList: document.getElementById("create-node-type-list"),
   createNodeDescription: document.getElementById("create-node-description"),
   confirmCreateNode: document.getElementById("confirm-create-node"),
-  createEdgeDialog: document.getElementById("create-edge-dialog"),
-  createEdgeTypeList: document.getElementById("create-edge-type-list"),
-  createEdgeLabel: document.getElementById("create-edge-label"),
-  createEdgeNote: document.getElementById("create-edge-note"),
-  createEdgeDescription: document.getElementById("create-edge-description"),
-  confirmCreateEdge: document.getElementById("confirm-create-edge"),
 };
 
 const serverConfig = getLocalFallbackConfig();
 let modelCapabilities = {};
-let knownModels = [];
 let graph = createInitialGraphDocument();
 let llmConfig = buildInitialConfig(
   AGENT_DEFINITIONS,
@@ -99,15 +86,12 @@ let llmConfig = buildInitialConfig(
   modelCapabilities
 );
 let nodeId = Math.max(2, getMaxGraphId(graph) + 1);
-let edgeId = Math.max(1, getMaxGraphEdgeId(graph) + 1);
 const interactionState = {
   selectedIds: graph.nodes[0]?.id == null ? [] : [graph.nodes[0].id],
   contextMenuNodeId: null,
   canvasContextMenuPosition: null,
   createNodeIntent: null,
   selectedCreateNodeType: "note",
-  createEdgeIntent: null,
-  selectedCreateEdgeType: DEFAULT_EDGE_TYPE,
 };
 
 function normalizeSelectedIds(ids = []) {
@@ -143,54 +127,6 @@ function replaceGraph(nextGraph) {
   syncSelection();
 }
 
-function getContextMenuNodeId() {
-  return interactionState.contextMenuNodeId;
-}
-
-function getCanvasContextPosition() {
-  return interactionState.canvasContextMenuPosition || { x: 0, y: 0 };
-}
-
-function setNodeContextTarget(nodeId) {
-  interactionState.contextMenuNodeId = nodeId;
-}
-
-function clearNodeContextTarget() {
-  interactionState.contextMenuNodeId = null;
-}
-
-function setCanvasContextPosition(position) {
-  interactionState.canvasContextMenuPosition = position;
-}
-
-function clearCanvasContextPosition() {
-  interactionState.canvasContextMenuPosition = null;
-}
-
-function setCreateNodeIntent(intent) {
-  interactionState.createNodeIntent = intent;
-}
-
-function getCreateNodeIntent() {
-  return interactionState.createNodeIntent;
-}
-
-function setSelectedCreateNodeType(type) {
-  interactionState.selectedCreateNodeType = type;
-}
-
-function setCreateEdgeIntent(intent) {
-  interactionState.createEdgeIntent = intent;
-}
-
-function getCreateEdgeIntent() {
-  return interactionState.createEdgeIntent;
-}
-
-function setSelectedCreateEdgeType(type) {
-  interactionState.selectedCreateEdgeType = type;
-}
-
 function clampToViewport(element, position, margin = 12) {
   const previousHidden = element.hidden;
   const previousVisibility = element.style.visibility;
@@ -218,23 +154,10 @@ function buildCreateNodeDescription(nodeType) {
   return `将在当前画布位置创建一个“${nodeType.creationLabel || nodeType.label}”。`;
 }
 
-function buildCreateEdgeDescription(edgeType, intent) {
-  if (!edgeType || !intent) {
-    return "选择关系类型并填写可选属性后创建。";
-  }
-
-  const sourceNode = findNodeInGraph(graph, intent.sourceId)?.node;
-  const targetNode = findNodeInGraph(graph, intent.targetId)?.node;
-  const sourceLabel = getNodeDialogTitle(sourceNode || { data: {} });
-  const targetLabel = getNodeDialogTitle(targetNode || { data: {} });
-
-  return `将在“${sourceLabel}”与“${targetLabel}”之间创建“${edgeType.creationLabel || edgeType.label}”关系。`;
-}
-
 function renderCreateNodeDialogOptions() {
   const nodeTypes = listNodeTypes();
-
   elements.createNodeTypeList.innerHTML = "";
+
   nodeTypes.forEach((nodeType) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -247,7 +170,7 @@ function renderCreateNodeDialogOptions() {
       <span class="option-card-desc">${nodeType.description || ""}</span>
     `;
     button.addEventListener("click", () => {
-      setSelectedCreateNodeType(nodeType.type);
+      interactionState.selectedCreateNodeType = nodeType.type;
       renderCreateNodeDialogOptions();
     });
     elements.createNodeTypeList.appendChild(button);
@@ -257,37 +180,6 @@ function renderCreateNodeDialogOptions() {
     (nodeType) => nodeType.type === interactionState.selectedCreateNodeType
   );
   elements.createNodeDescription.textContent = buildCreateNodeDescription(selectedNodeType);
-}
-
-function renderCreateEdgeDialogOptions() {
-  const edgeTypes = listEdgeTypes();
-  elements.createEdgeTypeList.innerHTML = "";
-
-  edgeTypes.forEach((edgeType) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `option-card${
-      interactionState.selectedCreateEdgeType === edgeType.type ? " is-active" : ""
-    }`;
-    button.dataset.edgeType = edgeType.type;
-    button.innerHTML = `
-      <span class="option-card-title">${edgeType.creationLabel || edgeType.label}</span>
-      <span class="option-card-desc">${edgeType.description || ""}</span>
-    `;
-    button.addEventListener("click", () => {
-      setSelectedCreateEdgeType(edgeType.type);
-      renderCreateEdgeDialogOptions();
-    });
-    elements.createEdgeTypeList.appendChild(button);
-  });
-
-  const selectedEdgeType = edgeTypes.find(
-    (edgeType) => edgeType.type === interactionState.selectedCreateEdgeType
-  );
-  elements.createEdgeDescription.textContent = buildCreateEdgeDescription(
-    selectedEdgeType,
-    getCreateEdgeIntent()
-  );
 }
 
 function getNodeOffsetAtScreenPosition(position) {
@@ -321,13 +213,13 @@ const graphCanvas = createGraphCanvas(canvas, {
     syncSelection();
   },
   onNodeMove: (id, deltaX, deltaY) => {
-    const found = findNodeInGraph(graph, id);
-    if (!found) {
+    const node = getNodeById(graph, id);
+    if (!node) {
       return;
     }
 
-    found.node.x = (found.node.x || 0) + deltaX;
-    found.node.y = (found.node.y || 0) + deltaY;
+    node.x = (node.x || 0) + deltaX;
+    node.y = (node.y || 0) + deltaY;
     persistGraph();
     syncSelection();
   },
@@ -342,11 +234,8 @@ const graphCanvas = createGraphCanvas(canvas, {
   onBackgroundContextMenu: (position) => {
     openCanvasContextMenu(position);
   },
-  onEdgeCreate: (sourceId, targetId) => {
-    closeAllContextMenus();
-    openCreateEdgeDialog({ sourceId, targetId });
-  },
 });
+
 const llmConfigUi = createLlmConfigController({
   agentDefinitions: AGENT_DEFINITIONS,
   elements,
@@ -355,7 +244,7 @@ const llmConfigUi = createLlmConfigController({
   setConfig: (nextConfig) => {
     llmConfig = nextConfig;
   },
-  getKnownModels: () => knownModels,
+  getKnownModels: () => Object.keys(modelCapabilities),
   getModelCapabilitiesMap: () => modelCapabilities,
 });
 
@@ -406,6 +295,33 @@ function renderNodePanel(node) {
   elements.nodeDialogPanel.innerHTML = "";
   elements.nodeDialogPanel.hidden = true;
 
+  const connections = getNodeConnections(node);
+  if (node.type !== "task_board" && !connections.length) {
+    return;
+  }
+
+  elements.nodeDialogPanel.hidden = false;
+
+  if (connections.length) {
+    const title = document.createElement("div");
+    title.className = "message-meta";
+    title.textContent = `关联节点 ${connections.length} 个`;
+    elements.nodeDialogPanel.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "task-board-list";
+    connections.forEach((connection) => {
+      const row = document.createElement("div");
+      row.className = "task-board-item";
+      row.innerHTML = `
+        <span class="task-board-item-status">-></span>
+        <span>${describeNodeConnection(node, connection)}</span>
+      `;
+      list.appendChild(row);
+    });
+    elements.nodeDialogPanel.appendChild(list);
+  }
+
   if (node.type !== "task_board") {
     return;
   }
@@ -436,7 +352,6 @@ function renderNodePanel(node) {
   }
 
   elements.nodeDialogPanel.appendChild(list);
-  elements.nodeDialogPanel.hidden = false;
 }
 
 function syncSelection() {
@@ -446,17 +361,17 @@ function syncSelection() {
 
 function openNodeDialog() {
   const { selectedId } = getSelection();
-  const found = findNodeInGraph(graph, selectedId);
-  if (!found) {
+  const node = getNodeById(graph, selectedId);
+  if (!node) {
     return;
   }
 
-  elements.nodeDialogSummary.textContent = getNodeDialogTitle(found.node);
-  elements.nodeDialogSubmit.textContent = getNodeSubmitButtonLabel(found.node);
+  elements.nodeDialogSummary.textContent = getNodeDialogTitle(node);
+  elements.nodeDialogSubmit.textContent = getNodeSubmitButtonLabel(node);
   elements.nodeDialogDirection.value = "";
-  renderNodePanel(found.node);
-  renderNodeMessages(found.node);
-  setNodeDialogStatus(getNodeDialogStatus(found.node));
+  renderNodePanel(node);
+  renderNodeMessages(node);
+  setNodeDialogStatus(getNodeDialogStatus(node));
   elements.nodeDialog.showModal();
 }
 
@@ -477,67 +392,21 @@ function appendNode(offsetX = 0, offsetY = 0, type = "note") {
 }
 
 function openCreateNodeDialog(intent) {
-  setCreateNodeIntent(intent);
-  setSelectedCreateNodeType("note");
+  interactionState.createNodeIntent = intent;
+  interactionState.selectedCreateNodeType = "note";
   renderCreateNodeDialogOptions();
   elements.createNodeDialog.showModal();
 }
 
 function confirmCreateNodeFromDialog() {
-  const intent = getCreateNodeIntent();
+  const intent = interactionState.createNodeIntent;
   if (!intent) {
     return;
   }
 
-  appendNode(
-    intent.offset.x,
-    intent.offset.y,
-    interactionState.selectedCreateNodeType
-  );
-  setStatus("已新增节点。");
-
+  appendNode(intent.offset.x, intent.offset.y, interactionState.selectedCreateNodeType);
   elements.createNodeDialog.close();
-}
-
-function openCreateEdgeDialog(intent) {
-  setCreateEdgeIntent(intent);
-  setSelectedCreateEdgeType(DEFAULT_EDGE_TYPE);
-  elements.createEdgeLabel.value = "";
-  elements.createEdgeNote.value = "";
-  renderCreateEdgeDialogOptions();
-  elements.createEdgeDialog.showModal();
-}
-
-function confirmCreateEdgeFromDialog() {
-  const intent = getCreateEdgeIntent();
-  if (!intent) {
-    return;
-  }
-
-  const sourceNode = findNodeInGraph(graph, intent.sourceId)?.node;
-  const targetNode = findNodeInGraph(graph, intent.targetId)?.node;
-  if (!sourceNode || !targetNode) {
-    setStatus("创建连接失败：节点不存在。", true);
-    return;
-  }
-
-  const edge = createEdge(
-    edgeId++,
-    intent.sourceId,
-    intent.targetId,
-    interactionState.selectedCreateEdgeType
-  );
-  edge.data = {
-    ...edge.data,
-    label: elements.createEdgeLabel.value.trim(),
-    note: elements.createEdgeNote.value.trim(),
-  };
-
-  addGraphEdge(graph, edge);
-  persistGraph();
-  syncSelection();
-  elements.createEdgeDialog.close();
-  setStatus("已创建连接。");
+  setStatus("已新增节点。");
 }
 
 async function loadServerDefaults() {
@@ -549,9 +418,7 @@ async function loadServerDefaults() {
 
     const serverDefaults = await response.json();
     modelCapabilities = serverDefaults.modelCapabilities || {};
-    knownModels = serverDefaults.knownModels || Object.keys(modelCapabilities);
     delete serverDefaults.modelCapabilities;
-    delete serverDefaults.knownModels;
 
     Object.assign(serverConfig, serverDefaults);
     llmConfig = buildInitialConfig(
@@ -563,7 +430,6 @@ async function loadServerDefaults() {
     llmConfigUi.hydrateForm();
   } catch {
     modelCapabilities = {};
-    knownModels = [];
   }
 }
 
@@ -582,12 +448,12 @@ function restoreGraphFromStorage() {
 }
 
 async function requestAgentRun(found, promptText) {
-  const context = extractGraphContext(graph, found.node.id);
+  const context = extractGraphContext(graph, found.id);
   const response = await fetch("/api/agent-run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      agentKey: found.node.data?.agentKey || "assistant",
+      agentKey: found.data?.agentKey || "assistant",
       context,
       prompt: promptText,
       config: llmConfig,
@@ -604,21 +470,22 @@ async function requestAgentRun(found, promptText) {
 
 async function appendNoteMessageFromDialog() {
   const { selectedId } = getSelection();
-  const found = findNodeInGraph(graph, selectedId);
-  if (!found) {
+  const node = getNodeById(graph, selectedId);
+  if (!node) {
     return;
   }
+
   const messageText = elements.nodeDialogDirection.value.trim();
   if (!messageText) {
     setNodeDialogStatus("先输入一条记录、问题或说明。", true);
     return;
   }
 
-  setNodeMessages(found.node, [...getNodeMessages(found.node), createMessage("user", messageText)]);
-  if (!getNodeSummary(found.node)) {
-    setNodeSummary(found.node, messageText.slice(0, 48));
+  setNodeMessages(node, [...getNodeMessages(node), createMessage("user", messageText)]);
+  if (!getNodeSummary(node)) {
+    setNodeSummary(node, messageText.slice(0, 48));
   }
-  resetNodeDialog(found.node);
+  resetNodeDialog(node);
   persistGraph();
   syncSelection();
   setNodeDialogStatus("记录已加入当前节点。");
@@ -627,8 +494,8 @@ async function appendNoteMessageFromDialog() {
 
 async function runAgentNodeFromDialog() {
   const { selectedId } = getSelection();
-  const found = findNodeInGraph(graph, selectedId);
-  if (!found) {
+  const node = getNodeById(graph, selectedId);
+  if (!node) {
     return;
   }
 
@@ -649,24 +516,24 @@ async function runAgentNodeFromDialog() {
   setNodeDialogStatus("Agent 处理中...");
 
   try {
-    setNodeMessages(found.node, [...getNodeMessages(found.node), createMessage("user", promptText)]);
-    const result = await requestAgentRun(found, promptText);
-    setNodeMessages(found.node, [
-      ...getNodeMessages(found.node),
-      createMessage("agent", result.message || "", found.node.data?.agentKey || "assistant"),
+    setNodeMessages(node, [...getNodeMessages(node), createMessage("user", promptText)]);
+    const result = await requestAgentRun(node, promptText);
+    setNodeMessages(node, [
+      ...getNodeMessages(node),
+      createMessage("agent", result.message || "", node.data?.agentKey || "assistant"),
     ]);
     if (result.summary) {
-      setNodeSummary(found.node, result.summary);
+      setNodeSummary(node, result.summary);
     }
-    resetNodeDialog(found.node);
+    resetNodeDialog(node);
     persistGraph();
     syncSelection();
     setNodeDialogStatus("Agent 已完成本轮响应。");
     setStatus("Agent 已完成本轮响应。");
   } catch (error) {
-    const currentMessages = getNodeMessages(found.node);
+    const currentMessages = getNodeMessages(node);
     setNodeMessages(
-      found.node,
+      node,
       currentMessages.filter(
         (message, index) =>
           !(
@@ -676,7 +543,7 @@ async function runAgentNodeFromDialog() {
           )
       )
     );
-    renderNodeMessages(found.node);
+    renderNodeMessages(node);
     setNodeDialogStatus(error.message || "Agent 请求失败", true);
   } finally {
     elements.nodeDialogSubmit.disabled = false;
@@ -685,8 +552,8 @@ async function runAgentNodeFromDialog() {
 
 async function updateTaskBoardFromDialog() {
   const { selectedId } = getSelection();
-  const found = findNodeInGraph(graph, selectedId);
-  if (!found) {
+  const node = getNodeById(graph, selectedId);
+  if (!node) {
     return;
   }
 
@@ -697,20 +564,20 @@ async function updateTaskBoardFromDialog() {
   }
 
   const nextItems = [
-    ...getTaskBoardItems(found.node),
+    ...getTaskBoardItems(node),
     {
       id: Date.now(),
       text: taskText,
       status: "todo",
     },
   ];
-  setTaskBoardItems(found.node, nextItems);
-  setNodeMessages(found.node, [
-    ...getNodeMessages(found.node),
+  setTaskBoardItems(node, nextItems);
+  setNodeMessages(node, [
+    ...getNodeMessages(node),
     createMessage("user", taskText),
     createMessage("agent", `已加入任务板：${taskText}`, "task_board"),
   ]);
-  resetNodeDialog(found.node);
+  resetNodeDialog(node);
   persistGraph();
   syncSelection();
   setNodeDialogStatus("任务已加入任务板。");
@@ -719,17 +586,17 @@ async function updateTaskBoardFromDialog() {
 
 async function submitNodeDialog() {
   const { selectedId } = getSelection();
-  const found = findNodeInGraph(graph, selectedId);
-  if (!found) {
+  const node = getNodeById(graph, selectedId);
+  if (!node) {
     return;
   }
 
-  if (found.node.type === "agent") {
+  if (node.type === "agent") {
     await runAgentNodeFromDialog();
     return;
   }
 
-  if (found.node.type === "task_board") {
+  if (node.type === "task_board") {
     await updateTaskBoardFromDialog();
     return;
   }
@@ -781,13 +648,12 @@ function deleteSelectedNodes(targetIds) {
 }
 
 function openNodeContextMenu(nodeId, position) {
-  const found = findNodeInGraph(graph, nodeId);
-  if (!found) {
+  if (!getNodeById(graph, nodeId)) {
     return;
   }
 
   closeCanvasContextMenu();
-  setNodeContextTarget(nodeId);
+  interactionState.contextMenuNodeId = nodeId;
   selectSingleNode(nodeId);
   syncSelection();
   elements.nodeContextMenu.hidden = false;
@@ -795,21 +661,21 @@ function openNodeContextMenu(nodeId, position) {
 }
 
 function closeNodeContextMenu() {
-  clearNodeContextTarget();
+  interactionState.contextMenuNodeId = null;
   elements.nodeContextMenu.hidden = true;
 }
 
 function openCanvasContextMenu(position) {
   closeNodeContextMenu();
   const { selectedIds } = getSelection();
-  setCanvasContextPosition(position);
+  interactionState.canvasContextMenuPosition = position;
   elements.contextDeleteSelectedNodes.hidden = selectedIds.length < 2;
   elements.canvasContextMenu.hidden = false;
   clampToViewport(elements.canvasContextMenu, position);
 }
 
 function closeCanvasContextMenu() {
-  clearCanvasContextPosition();
+  interactionState.canvasContextMenuPosition = null;
   elements.canvasContextMenu.hidden = true;
 }
 
@@ -842,7 +708,7 @@ elements.floatingHelp.addEventListener("click", () => {
 });
 
 elements.contextEditNode.addEventListener("click", () => {
-  const nodeId = getContextMenuNodeId();
+  const nodeId = interactionState.contextMenuNodeId;
   if (nodeId === null) {
     return;
   }
@@ -852,7 +718,7 @@ elements.contextEditNode.addEventListener("click", () => {
 });
 
 elements.contextDeleteNode.addEventListener("click", () => {
-  const nodeId = getContextMenuNodeId();
+  const nodeId = interactionState.contextMenuNodeId;
   if (nodeId === null) {
     return;
   }
@@ -860,7 +726,7 @@ elements.contextDeleteNode.addEventListener("click", () => {
 });
 
 elements.contextAddNode.addEventListener("click", () => {
-  const offset = getNodeOffsetAtScreenPosition(getCanvasContextPosition());
+  const offset = getNodeOffsetAtScreenPosition(interactionState.canvasContextMenuPosition || { x: 0, y: 0 });
   closeCanvasContextMenu();
   openCreateNodeDialog({ offset });
 });
@@ -882,10 +748,6 @@ elements.confirmCreateNode.addEventListener("click", () => {
   confirmCreateNodeFromDialog();
 });
 
-elements.confirmCreateEdge.addEventListener("click", () => {
-  confirmCreateEdgeFromDialog();
-});
-
 window.addEventListener("resize", () => {
   closeAllContextMenus();
   graphCanvas.resize();
@@ -905,55 +767,18 @@ bindDialogBackdropClose(elements.helpDialog);
 bindDialogBackdropClose(elements.configDialog);
 bindDialogBackdropClose(elements.nodeDialog);
 bindDialogBackdropClose(elements.createNodeDialog);
-bindDialogBackdropClose(elements.createEdgeDialog);
 llmConfigUi.renderAgentPanels();
 graph = restoreGraphFromStorage();
 nodeId = Math.max(2, getMaxGraphId(graph) + 1);
-edgeId = Math.max(1, getMaxGraphEdgeId(graph) + 1);
 setSelection(graph.nodes[0] ? [graph.nodes[0].id] : []);
 syncSelection();
 graphCanvas.resize();
 loadServerDefaults();
 
-window.__mindtreeTestApi = {
-  openNodeById(id) {
-    selectSingleNode(id);
-    syncSelection();
-    openNodeDialog();
-  },
-  getSelection() {
-    return {
-      ...getSelection(),
-      nodeContextMenuHidden: elements.nodeContextMenu.hidden,
-      canvasContextMenuHidden: elements.canvasContextMenu.hidden,
-      batchDeleteHidden: elements.contextDeleteSelectedNodes.hidden,
-    };
-  },
-  getGraph() {
-    return JSON.parse(JSON.stringify(graph));
-  },
-  setGraph(nextGraph) {
-    graph = normalizeGraph(nextGraph);
-    nodeId = Math.max(2, getMaxGraphId(graph) + 1);
-    edgeId = Math.max(1, getMaxGraphEdgeId(graph) + 1);
-    setSelection(graph.nodes[0] ? [graph.nodes[0].id] : []);
-    persistGraph();
-    syncSelection();
-  },
-  listEdgeTypes() {
-    return listEdgeTypes().map((definition) => ({
-      type: definition.type,
-      label: definition.label,
-      cascadesDelete: definition.cascadesDelete,
-    }));
-  },
-  extractGraphContext(nodeId) {
-    return extractGraphContext(graph, nodeId);
-  },
-  getEdgeCount() {
-    return graph.edges.length;
-  },
-  getNodeScreenBox(id) {
-    return graphCanvas.getNodeScreenBox(id);
-  },
-};
+if (isTestMode) {
+  window.__mindzooTestApi = {
+    getNodeScreenBox(id) {
+      return graphCanvas.getNodeScreenBox(id);
+    },
+  };
+}

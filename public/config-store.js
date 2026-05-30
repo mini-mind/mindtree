@@ -1,6 +1,6 @@
 const storageKeys = {
-  graph: "mindtree.graph.v1",
-  config: "mindtree.llm.v1",
+  graph: "mindzoo.graph.v2",
+  config: "mindzoo.llm.v2",
 };
 
 function clearStoredGraph() {

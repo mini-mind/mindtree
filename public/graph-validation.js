@@ -1,3 +1,5 @@
+import { getNodeConnections } from "./node-types.js";
+
 export class GraphValidationError extends Error {
   constructor(message) {
     super(message);
@@ -14,8 +16,8 @@ function ensureGraphShape(graph) {
     fail("graph must be an object");
   }
 
-  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    fail("graph must contain nodes and edges arrays");
+  if (!Array.isArray(graph.nodes)) {
+    fail("graph must contain a nodes array");
   }
 }
 
@@ -25,52 +27,38 @@ function ensureFiniteId(value, label) {
   }
 }
 
-function ensureUniqueIds(items, label) {
+function ensureUniqueNodeIds(nodes) {
   const seen = new Set();
-  items.forEach((item, index) => {
-    ensureFiniteId(item?.id, `${label}[${index}].id`);
-    if (seen.has(item.id)) {
-      fail(`duplicate ${label} id: ${item.id}`);
+  nodes.forEach((node, index) => {
+    ensureFiniteId(node?.id, `nodes[${index}].id`);
+    if (seen.has(node.id)) {
+      fail(`duplicate node id: ${node.id}`);
     }
-    seen.add(item.id);
+    seen.add(node.id);
   });
 }
 
-function ensureEdgeEndpoints(graph, nodeIds) {
-  graph.edges.forEach((edge, index) => {
-    ensureFiniteId(edge?.source, `edges[${index}].source`);
-    ensureFiniteId(edge?.target, `edges[${index}].target`);
+function ensureConnectionTargets(graph, nodeIds) {
+  graph.nodes.forEach((node, index) => {
+    getNodeConnections(node).forEach((connection, connectionIndex) => {
+      ensureFiniteId(
+        connection?.nodeId,
+        `nodes[${index}] linked target[${connectionIndex}].nodeId`
+      );
 
-    if (!nodeIds.has(edge.source)) {
-      fail(`edge ${edge.id} references missing source node ${edge.source}`);
-    }
-
-    if (!nodeIds.has(edge.target)) {
-      fail(`edge ${edge.id} references missing target node ${edge.target}`);
-    }
+      if (!nodeIds.has(connection.nodeId)) {
+        fail(`node ${node.id} links missing target node ${connection.nodeId}`);
+      }
+    });
   });
 }
 
 export function assertGraphDocument(graph) {
   ensureGraphShape(graph);
-  ensureUniqueIds(graph.nodes, "node");
-  ensureUniqueIds(graph.edges, "edge");
+  ensureUniqueNodeIds(graph.nodes);
 
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
-  ensureEdgeEndpoints(graph, nodeIds);
+  ensureConnectionTargets(graph, nodeIds);
 
   return graph;
-}
-
-export function validateGraphDocument(graph) {
-  try {
-    assertGraphDocument(graph);
-    return { valid: true, error: "" };
-  } catch (error) {
-    if (error instanceof GraphValidationError) {
-      return { valid: false, error: error.message };
-    }
-
-    throw error;
-  }
 }

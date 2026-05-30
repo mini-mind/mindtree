@@ -24,63 +24,43 @@ function normalizeNodeSnapshot(node) {
   }
 
   const data = node.data && typeof node.data === "object" ? node.data : {};
+  const normalizedData = { ...data };
+  delete normalizedData.taskBoards;
   return {
     id: Number(node.id),
     type: typeof node.type === "string" ? node.type : "note",
     data: {
-      ...data,
-      summary: typeof data.summary === "string" ? data.summary : "",
-      messages: Array.isArray(data.messages)
-        ? data.messages.map(normalizeMessage).filter(Boolean)
+      ...normalizedData,
+      summary: typeof normalizedData.summary === "string" ? normalizedData.summary : "",
+      messages: Array.isArray(normalizedData.messages)
+        ? normalizedData.messages.map(normalizeMessage).filter(Boolean)
         : [],
     },
   };
 }
 
-function normalizeRelation(relation) {
-  if (!relation || typeof relation !== "object") {
+function normalizeLinkedNode(linkedNode) {
+  if (!linkedNode || typeof linkedNode !== "object") {
     return null;
   }
 
-  if (!isFiniteId(relation.id)) {
+  const nodeId = Number(linkedNode.nodeId);
+  if (!isFiniteId(nodeId)) {
+    return null;
+  }
+
+  const node = normalizeNodeSnapshot(linkedNode.node);
+  if (!node || node.id !== nodeId) {
     return null;
   }
 
   return {
-    id: Number(relation.id),
-    type: typeof relation.type === "string" ? relation.type : "relates_to",
-    direction: relation.direction === "incoming" ? "incoming" : "outgoing",
-    node: normalizeNodeSnapshot(relation.node),
-    data: relation.data && typeof relation.data === "object" ? { ...relation.data } : {},
+    nodeId,
+    type: typeof linkedNode.type === "string" && linkedNode.type ? linkedNode.type : "link",
+    label: typeof linkedNode.label === "string" ? linkedNode.label : "",
+    node,
+    data: linkedNode.data && typeof linkedNode.data === "object" ? { ...linkedNode.data } : {},
   };
-}
-
-function bucketRelationsByType(relations) {
-  return relations.reduce((buckets, relation) => {
-    if (!buckets[relation.type]) {
-      buckets[relation.type] = [];
-    }
-    buckets[relation.type].push(relation);
-    return buckets;
-  }, {});
-}
-
-function validateRelations(relations) {
-  const relationIds = new Set();
-
-  for (const relation of relations) {
-    if (!relation?.node) {
-      return false;
-    }
-
-    if (relationIds.has(relation.id)) {
-      return false;
-    }
-
-    relationIds.add(relation.id);
-  }
-
-  return true;
 }
 
 function normalizeGraphContext(context) {
@@ -89,49 +69,22 @@ function normalizeGraphContext(context) {
   }
 
   const focusNode = normalizeNodeSnapshot(context.focusNode);
-  const incoming = Array.isArray(context?.relations?.incoming)
-    ? context.relations.incoming.map(normalizeRelation).filter(Boolean)
-    : [];
-  const outgoing = Array.isArray(context?.relations?.outgoing)
-    ? context.relations.outgoing.map(normalizeRelation).filter(Boolean)
+  const linkedNodes = Array.isArray(context?.linkedNodes)
+    ? context.linkedNodes.map(normalizeLinkedNode)
     : [];
 
   if (!focusNode) {
     return null;
   }
 
-  if (!validateRelations([...incoming, ...outgoing])) {
+  if (linkedNodes.some((item) => !item)) {
     return null;
   }
 
-  const nodeIndex = new Map();
-  [focusNode, ...incoming.map((item) => item.node), ...outgoing.map((item) => item.node)]
-    .filter(Boolean)
-    .forEach((node) => {
-      nodeIndex.set(node.id, node);
-    });
-
   return {
-    version: 2,
+    version: 4,
     focusNode,
-    relations: {
-      incoming,
-      outgoing,
-      byType: {
-        incoming: bucketRelationsByType(incoming),
-        outgoing: bucketRelationsByType(outgoing),
-      },
-    },
-    subgraph: {
-      nodes: [...nodeIndex.values()],
-      edges: [...incoming, ...outgoing].map((relation) => ({
-        id: relation.id,
-        type: relation.type,
-        direction: relation.direction,
-        nodeId: relation.node?.id ?? null,
-        data: { ...relation.data },
-      })),
-    },
+    linkedNodes,
   };
 }
 

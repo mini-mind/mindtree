@@ -21,7 +21,7 @@ function createJsonResponse(status, payload) {
   };
 }
 
-test("buildAgentRunPrompt includes focus node, relations, and user request", () => {
+test("buildAgentRunPrompt includes focus node, linked nodes, and user request", () => {
   const prompt = buildAgentRunPrompt(
     {
       focusNode: {
@@ -32,21 +32,18 @@ test("buildAgentRunPrompt includes focus node, relations, and user request", () 
           messages: [{ role: "agent", agent: "assistant", content: "负责分析外部依赖" }],
         },
       },
-      relations: {
-        incoming: [
-          {
-            id: 1,
-            type: "depends_on",
-            direction: "incoming",
-            node: {
-              id: 2,
-              type: "note",
-              data: { summary: "依赖项", messages: [] },
-            },
+      linkedNodes: [
+        {
+          type: "agent/task_board",
+          nodeId: 2,
+          node: {
+            id: 2,
+            type: "task_board",
+            data: { summary: "共享任务板", messages: [] },
           },
-        ],
-        outgoing: [],
-      },
+          data: { label: "执行任务" },
+        },
+      ],
     },
     "请分析当前风险",
     "custom system"
@@ -54,8 +51,8 @@ test("buildAgentRunPrompt includes focus node, relations, and user request", () 
 
   assert.equal(prompt.system, "custom system");
   assert.match(prompt.user, /Focus node:/);
-  assert.match(prompt.user, /Incoming relations:/);
-  assert.match(prompt.user, /depends_on/);
+  assert.match(prompt.user, /Linked nodes:/);
+  assert.match(prompt.user, /agent\/task_board/);
   assert.match(prompt.user, /User request: 请分析当前风险/);
 });
 
@@ -104,7 +101,7 @@ test("POST /api/agent-run validates missing context", async () => {
   }
 });
 
-test("POST /api/agent-run rejects invalid relation snapshots", async () => {
+test("POST /api/agent-run rejects invalid linked node snapshots", async () => {
   const app = createApp();
   const server = app.listen(0);
   await once(server, "listening");
@@ -123,10 +120,7 @@ test("POST /api/agent-run rejects invalid relation snapshots", async () => {
             type: "agent",
             data: { summary: "研究 Agent", messages: [] },
           },
-          relations: {
-            incoming: [{ id: 1, type: "depends_on", direction: "incoming", node: null, data: {} }],
-            outgoing: [],
-          },
+          linkedNodes: [{ type: "agent/task_board", nodeId: 2, node: null, data: {} }],
         },
         config: { apiKey: "test-key" },
       }),
@@ -150,8 +144,8 @@ test("POST /api/agent-run uses per-agent overrides when provided", async () => {
           {
             message: {
               content: JSON.stringify({
-                message: "建议先盘点外部依赖，再确认单点故障风险。",
-                summary: "外部依赖风险分析",
+                message: "建议先盘点任务板与 agent 的内部连接，再确认执行顺序。",
+                summary: "任务协作风险分析",
               }),
             },
           },
@@ -176,7 +170,18 @@ test("POST /api/agent-run uses per-agent overrides when provided", async () => {
             type: "agent",
             data: { summary: "研究 Agent", messages: [] },
           },
-          relations: { incoming: [], outgoing: [] },
+          linkedNodes: [
+            {
+              type: "agent/task_board",
+              nodeId: 2,
+              node: {
+                id: 2,
+                type: "task_board",
+                data: { summary: "共享任务板", messages: [] },
+              },
+              data: { label: "执行任务" },
+            },
+          ],
         },
         config: {
           baseUrl: "https://base.example/v1",
@@ -197,8 +202,8 @@ test("POST /api/agent-run uses per-agent overrides when provided", async () => {
     assert.equal(response.status, 200);
     assert.equal(fetchCalls.length, 1);
     assert.equal(fetchCalls[0].url, "https://assistant.example/v1/chat/completions");
-    assert.equal(data.message, "建议先盘点外部依赖，再确认单点故障风险。");
-    assert.equal(data.summary, "外部依赖风险分析");
+    assert.equal(data.message, "建议先盘点任务板与 agent 的内部连接，再确认执行顺序。");
+    assert.equal(data.summary, "任务协作风险分析");
   } finally {
     server.close();
   }
@@ -228,7 +233,7 @@ test("POST /api/agent-run surfaces invalid JSON from model as 502", async () => 
             type: "agent",
             data: { summary: "研究 Agent", messages: [] },
           },
-          relations: { incoming: [], outgoing: [] },
+          linkedNodes: [],
         },
         config: { apiKey: "test-key" },
       }),

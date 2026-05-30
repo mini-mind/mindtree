@@ -2,7 +2,7 @@ const { createHttpError } = require("./errors");
 const { normalizeGraphContext } = require("./graph-context");
 const { requestModelJson } = require("./llm-client");
 const { mergeLlmConfig, resolveAgentConnection } = require("./config");
-const { formatNode, formatRelations } = require("./prompts");
+const { formatLinkedNodes, formatNode } = require("./prompts");
 
 function validateAgentRunInput(agentKey, context, prompt, config) {
   if (!agentKey || typeof agentKey !== "string") {
@@ -29,11 +29,8 @@ function buildAgentRunPrompt(context, prompt, systemPrompt = "") {
       "Focus node:",
       formatNode(context.focusNode),
       "",
-      "Incoming relations:",
-      formatRelations(context.relations?.incoming || []),
-      "",
-      "Outgoing relations:",
-      formatRelations(context.relations?.outgoing || []),
+      "Linked nodes:",
+      formatLinkedNodes(context.linkedNodes || []),
       "",
       `User request: ${String(prompt).trim()}`,
       "",

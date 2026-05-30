@@ -22,7 +22,7 @@ test("SiliconFlow DeepSeek-V3.2 smoke test", async () => {
           ],
         },
       },
-      relations: { incoming: [], outgoing: [] },
+      linkedNodes: [],
     },
     prompt: "请给出下一步最小可执行建议",
     config: {

@@ -1,9 +1,8 @@
 import {
-  getIncomingEdges,
   getNodeById,
+  getNodeConnections,
   getNodeMessages,
   getNodeSummary,
-  getOutgoingEdges,
 } from "./graph-model.js";
 import { assertGraphDocument } from "./graph-validation.js";
 
@@ -12,38 +11,30 @@ function createNodeSnapshot(node) {
     return null;
   }
 
+  const data = node.data && typeof node.data === "object" ? { ...node.data } : {};
+  delete data.taskBoards;
+
   return {
     id: node.id,
     type: node.type,
     data: {
-      ...node.data,
+      ...data,
       summary: getNodeSummary(node),
       messages: getNodeMessages(node).map((message) => ({ ...message })),
     },
   };
 }
 
-function createRelationSnapshot(graph, edge, direction) {
-  const relatedNode =
-    direction === "incoming" ? getNodeById(graph, edge.source) : getNodeById(graph, edge.target);
+function createLinkedNodeSnapshot(graph, connection) {
+  const relatedNode = getNodeById(graph, connection.nodeId);
 
   return {
-    id: edge.id,
-    type: edge.type,
-    direction,
+    nodeId: connection.nodeId,
+    type: connection.type,
+    label: typeof connection.label === "string" ? connection.label : "",
     node: createNodeSnapshot(relatedNode),
-    data: edge.data && typeof edge.data === "object" ? { ...edge.data } : {},
+    data: connection.data && typeof connection.data === "object" ? { ...connection.data } : {},
   };
-}
-
-function bucketRelationsByType(relations) {
-  return relations.reduce((buckets, relation) => {
-    if (!buckets[relation.type]) {
-      buckets[relation.type] = [];
-    }
-    buckets[relation.type].push(relation);
-    return buckets;
-  }, {});
 }
 
 export function extractGraphContext(graph, focusNodeId) {
@@ -53,40 +44,13 @@ export function extractGraphContext(graph, focusNodeId) {
     return null;
   }
 
-  const incoming = getIncomingEdges(graph, focusNodeId).map((edge) =>
-    createRelationSnapshot(graph, edge, "incoming")
-  );
-  const outgoing = getOutgoingEdges(graph, focusNodeId).map((edge) =>
-    createRelationSnapshot(graph, edge, "outgoing")
-  );
-
-  const nodeIndex = new Map();
-  [createNodeSnapshot(focusNode), ...incoming.map((item) => item.node), ...outgoing.map((item) => item.node)]
-    .filter(Boolean)
-    .forEach((node) => {
-      nodeIndex.set(node.id, node);
-    });
+  const linkedNodes = getNodeConnections(focusNode)
+    .map((connection) => createLinkedNodeSnapshot(graph, connection))
+    .filter((item) => item.node);
 
   return {
-    version: 2,
+    version: 4,
     focusNode: createNodeSnapshot(focusNode),
-    relations: {
-      incoming,
-      outgoing,
-      byType: {
-        incoming: bucketRelationsByType(incoming),
-        outgoing: bucketRelationsByType(outgoing),
-      },
-    },
-    subgraph: {
-      nodes: [...nodeIndex.values()],
-      edges: [...incoming, ...outgoing].map((relation) => ({
-        id: relation.id,
-        type: relation.type,
-        direction: relation.direction,
-        nodeId: relation.node?.id ?? null,
-        data: { ...relation.data },
-      })),
-    },
+    linkedNodes,
   };
 }

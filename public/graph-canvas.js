@@ -1,4 +1,3 @@
-import { getEdgeCanvasStyle, rendersEdgeOnCanvas } from "./edge-types.js";
 import { getCanvasNodeSummary } from "./node-types.js";
 
 export const GRAPH_CANVAS_THEME = {
@@ -33,13 +32,11 @@ export function createGraphCanvas(
     onNodeMove,
     onNodeContextMenu,
     onBackgroundContextMenu,
-    onEdgeCreate,
   }
 ) {
   const ctx = canvas.getContext("2d");
   const contextMenuDragThreshold = 8;
   const animation = {
-    phase: 0,
     frameId: null,
   };
   const view = {
@@ -53,7 +50,6 @@ export function createGraphCanvas(
   const pointerState = {
     contextMenuCandidate: null,
     selectionBox: null,
-    edgeDraft: null,
   };
   let hitRegions = [];
   let currentGraph = null;
@@ -216,62 +212,6 @@ export function createGraphCanvas(
     ctx.restore();
   }
 
-  function cubicPoint(start, control1, control2, end, t) {
-    const inverse = 1 - t;
-    const inverseSquared = inverse * inverse;
-    const inverseCubed = inverseSquared * inverse;
-    const tSquared = t * t;
-    const tCubed = tSquared * t;
-
-    return {
-      x:
-        inverseCubed * start.x +
-        3 * inverseSquared * t * control1.x +
-        3 * inverse * tSquared * control2.x +
-        tCubed * end.x,
-      y:
-        inverseCubed * start.y +
-        3 * inverseSquared * t * control1.y +
-        3 * inverse * tSquared * control2.y +
-        tCubed * end.y,
-    };
-  }
-
-  function drawLink(edge, parentBox, childBox) {
-    const from = worldToScreen(parentBox.x + parentBox.width, parentBox.y + parentBox.height / 2);
-    const to = worldToScreen(childBox.x, childBox.y + childBox.height / 2);
-    const mid = (from.x + to.x) / 2;
-    const control1 = { x: mid, y: from.y };
-    const control2 = { x: mid, y: to.y };
-    const style = getEdgeCanvasStyle(edge);
-
-    ctx.save();
-    ctx.strokeStyle = style.strokeStyle;
-    ctx.lineWidth = style.lineWidth;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(control1.x, control1.y, control2.x, control2.y, to.x, to.y);
-    ctx.stroke();
-
-    const pulseCount = 3;
-    const pulseGap = 0.18;
-    for (let index = 0; index < pulseCount; index += 1) {
-      const progress = (animation.phase + index * pulseGap) % 1;
-      const trail = Math.max(0, progress - 0.06);
-      const leadPoint = cubicPoint(from, control1, control2, to, progress);
-      const trailPoint = cubicPoint(from, control1, control2, to, trail);
-
-      ctx.strokeStyle = style.pulseColor.replace("ALPHA", `${0.18 + index * 0.09}`);
-      ctx.lineWidth = style.pulseLineWidth;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(trailPoint.x, trailPoint.y);
-      ctx.lineTo(leadPoint.x, leadPoint.y);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
   function drawNode(node, box, selected) {
     const topLeft = worldToScreen(box.x, box.y);
     const width = box.width * view.scale;
@@ -309,12 +249,7 @@ export function createGraphCanvas(
     ctx.fillStyle = "rgba(98, 106, 116, 0.92)";
     ctx.font = `500 ${Math.max(12, 14 * view.scale)}px "IBM Plex Sans"`;
     box.summaryRows.forEach((line, index) => {
-      ctx.fillText(
-        line,
-        contentLeft,
-        topLeft.y + 30 + index * 18,
-        contentWidth
-      );
+      ctx.fillText(line, contentLeft, topLeft.y + 30 + index * 18, contentWidth);
     });
     ctx.restore();
 
@@ -344,34 +279,6 @@ export function createGraphCanvas(
     ctx.setLineDash([6, 4]);
     ctx.fillRect(x, y, width, height);
     ctx.strokeRect(x, y, width, height);
-    ctx.restore();
-  }
-
-  function drawEdgeDraft(draft) {
-    if (!draft) {
-      return;
-    }
-
-    const sourceRegion = hitRegions.find((item) => item.id === draft.sourceId);
-    if (!sourceRegion) {
-      return;
-    }
-
-    const from = {
-      x: sourceRegion.x + sourceRegion.width,
-      y: sourceRegion.y + sourceRegion.height / 2,
-    };
-    const to = { x: draft.currentX, y: draft.currentY };
-    const mid = (from.x + to.x) / 2;
-
-    ctx.save();
-    ctx.strokeStyle = "rgba(166, 123, 53, 0.6)";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 6]);
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(mid, from.y, mid, to.y, to.x, to.y);
-    ctx.stroke();
     ctx.restore();
   }
 
@@ -453,41 +360,22 @@ export function createGraphCanvas(
     const layout = layoutGraph(currentGraph);
     const bounds = getLayoutBounds(layout);
 
-    currentGraph.edges
-      .filter((edge) => rendersEdgeOnCanvas(edge))
-      .forEach((edge) => {
-        const source = layout.get(edge.source);
-        const target = layout.get(edge.target);
-        if (source && target) {
-          drawLink(edge, source, target);
-        }
-      });
-
     currentGraph.nodes.forEach((node) => {
       const box = layout.get(node.id);
       if (!box) {
         return;
       }
-      drawNode(
-        node,
-        box,
-        node.id === currentSelectedId || currentSelectedIds.includes(node.id)
-      );
+      drawNode(node, box, node.id === currentSelectedId || currentSelectedIds.includes(node.id));
     });
 
     if (pointerState.selectionBox) {
       drawSelectionBox(pointerState.selectionBox);
     }
 
-    if (pointerState.edgeDraft) {
-      drawEdgeDraft(pointerState.edgeDraft);
-    }
-
     drawMinimap(layout, bounds, width, height);
   }
 
   function tick() {
-    animation.phase = (animation.phase + 0.006) % 1;
     draw();
     animation.frameId = window.requestAnimationFrame(tick);
   }
@@ -522,15 +410,6 @@ export function createGraphCanvas(
         moved: false,
       };
 
-      if (hit) {
-        pointerState.edgeDraft = {
-          sourceId: hit.id,
-          currentX: event.clientX,
-          currentY: event.clientY,
-          moved: false,
-        };
-      }
-
       if (!hit) {
         view.draggingCanvas = false;
         view.lastX = event.clientX;
@@ -547,21 +426,16 @@ export function createGraphCanvas(
       return;
     }
 
-    if (hit) {
-      onNodeSelect(hit.id);
-      draggingNodeId = hit.id;
-      view.lastX = event.clientX;
-      view.lastY = event.clientY;
-      const now = Date.now();
-      if (lastHitId === hit.id && now - lastHitAt < 320) {
-        onNodeOpen(hit.id);
-      }
-      lastHitId = hit.id;
-      lastHitAt = now;
-      return;
+    onNodeSelect(hit.id);
+    draggingNodeId = hit.id;
+    view.lastX = event.clientX;
+    view.lastY = event.clientY;
+    const now = Date.now();
+    if (lastHitId === hit.id && now - lastHitAt < 320) {
+      onNodeOpen(hit.id);
     }
-
-    onBackgroundSelect();
+    lastHitId = hit.id;
+    lastHitAt = now;
   });
 
   canvas.addEventListener("pointermove", (event) => {
@@ -577,16 +451,7 @@ export function createGraphCanvas(
         if (pointerState.contextMenuCandidate.hitId === null) {
           view.draggingCanvas = true;
         }
-        if (pointerState.edgeDraft) {
-          pointerState.edgeDraft.moved = true;
-        }
       }
-    }
-
-    if (pointerState.edgeDraft) {
-      pointerState.edgeDraft.currentX = event.clientX;
-      pointerState.edgeDraft.currentY = event.clientY;
-      draw();
     }
 
     if (draggingNodeId !== null) {
@@ -630,11 +495,12 @@ export function createGraphCanvas(
         const top = Math.min(selectionBox.startY, selectionBox.currentY);
         const bottom = Math.max(selectionBox.startY, selectionBox.currentY);
         const selectedIds = hitRegions
-          .filter((region) =>
-            region.x < right &&
-            region.x + region.width > left &&
-            region.y < bottom &&
-            region.y + region.height > top
+          .filter(
+            (region) =>
+              region.x < right &&
+              region.x + region.width > left &&
+              region.y < bottom &&
+              region.y + region.height > top
           )
           .map((region) => region.id);
 
@@ -650,30 +516,13 @@ export function createGraphCanvas(
 
     if (event.button === 2 && pointerState.contextMenuCandidate) {
       const { hitId, moved } = pointerState.contextMenuCandidate;
-      const edgeDraft = pointerState.edgeDraft;
       pointerState.contextMenuCandidate = null;
-      pointerState.edgeDraft = null;
 
       if (!moved) {
         if (hitId !== null) {
           onNodeContextMenu?.(hitId, { x: event.clientX, y: event.clientY });
         } else {
           onBackgroundContextMenu?.({ x: event.clientX, y: event.clientY });
-        }
-      } else if (edgeDraft?.moved && edgeDraft.sourceId !== null) {
-        const dropHit = hitRegions.find(
-          (region) =>
-            event.clientX >= region.x &&
-            event.clientX <= region.x + region.width &&
-            event.clientY >= region.y &&
-            event.clientY <= region.y + region.height
-        );
-
-        if (dropHit && dropHit.id !== edgeDraft.sourceId) {
-          onEdgeCreate?.(edgeDraft.sourceId, dropHit.id, {
-            x: event.clientX,
-            y: event.clientY,
-          });
         }
       }
 
@@ -687,7 +536,6 @@ export function createGraphCanvas(
   canvas.addEventListener("pointerleave", () => {
     pointerState.contextMenuCandidate = null;
     pointerState.selectionBox = null;
-    pointerState.edgeDraft = null;
     view.draggingCanvas = false;
     draggingNodeId = null;
   });

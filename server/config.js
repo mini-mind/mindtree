@@ -7,7 +7,6 @@ function buildDefaultConfigResponse() {
     model: DEFAULT_LLM_CONFIG.model,
     agents: DEFAULT_LLM_CONFIG.agents,
     modelCapabilities: MODEL_CAPABILITIES,
-    knownModels: Object.keys(MODEL_CAPABILITIES),
   };
 }
 
