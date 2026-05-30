@@ -2,14 +2,14 @@ const { createHttpError } = require("./errors");
 const { normalizeGraphContext } = require("./graph-context");
 const { requestModelJson } = require("./llm-client");
 const { mergeLlmConfig, resolveAgentConnection } = require("./config");
-const { formatLinkedNodes, formatNode } = require("./prompts");
+const { formatEntity, formatLinkedEntities } = require("./prompts");
 
 function validateAgentRunInput(agentKey, context, prompt, config) {
   if (!agentKey || typeof agentKey !== "string") {
     throw createHttpError(400, "agentKey is required");
   }
 
-  if (!context?.focusNode) {
+  if (!context?.focusEntity) {
     throw createHttpError(400, "context is required");
   }
 
@@ -26,11 +26,11 @@ function buildAgentRunPrompt(context, prompt, systemPrompt = "") {
   return {
     system: systemPrompt,
     user: [
-      "Focus node:",
-      formatNode(context.focusNode),
+      "Focus entity:",
+      formatEntity(context.focusEntity),
       "",
-      "Linked nodes:",
-      formatLinkedNodes(context.linkedNodes || []),
+      "Linked entities:",
+      formatLinkedEntities(context.linkedEntities || []),
       "",
       `User request: ${String(prompt).trim()}`,
       "",

@@ -1,3 +1,5 @@
+import { serializeGraph } from "./graph-model.js";
+
 const storageKeys = {
   graph: "mindzoo.graph.v2",
   config: "mindzoo.llm.v2",
@@ -25,7 +27,7 @@ export function loadGraph() {
 }
 
 export function saveGraph(graph) {
-  localStorage.setItem(storageKeys.graph, JSON.stringify(graph));
+  localStorage.setItem(storageKeys.graph, JSON.stringify(serializeGraph(graph)));
 }
 
 export function loadStoredConfig() {

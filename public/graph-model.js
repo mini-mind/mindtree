@@ -1,49 +1,80 @@
 import { assertGraphDocument } from "./graph-validation.js";
-import {
-  createNodeData,
-  DEFAULT_NODE_TYPE,
-  getNodeConnections,
-  getNodeMessages,
-  getNodeSummary,
-  normalizeNodeData,
-  pruneNodeConnections,
-  setNodeMessages,
-  setNodeSummary,
-} from "./node-types.js";
+import { BASE_NODE_BLUEPRINTS } from "./ecs-defaults.js";
+import { getEntityCanvasSummary } from "./ecs-plugins.js";
+import { serializeRuntimelessGraph } from "./ecs-world.js";
 
-export function createMessage(role, content, agent = "") {
+const DEFAULT_BLUEPRINT_KEY = "note";
+
+function getBlueprint(type = DEFAULT_BLUEPRINT_KEY) {
+  return BASE_NODE_BLUEPRINTS.find((item) => item.key === type) || BASE_NODE_BLUEPRINTS[0];
+}
+
+function createBlueprintDataDefaults(blueprint) {
   return {
-    role,
-    agent,
-    content,
+    summary:
+      blueprint.key === "agent"
+        ? "新 Agent"
+        : blueprint.key === "task_board"
+          ? "共享任务板"
+          : "",
+    messages: [],
+    ...(blueprint.key === "agent"
+      ? { agentKey: "assistant", links: [] }
+      : blueprint.key === "task_board"
+        ? { items: [] }
+        : {}),
   };
 }
 
-export { getNodeSummary, setNodeSummary, getNodeMessages, setNodeMessages, getNodeConnections };
+function createBlueprintPluginMounts(blueprint) {
+  return blueprint.plugins.map((plugin) => ({
+    key: plugin.key,
+    config: plugin.config && typeof plugin.config === "object" ? { ...plugin.config } : {},
+  }));
+}
 
-export function createNode(id, x = 0, y = 0, type = DEFAULT_NODE_TYPE) {
+export function createNode(id, x = 0, y = 0, type = DEFAULT_BLUEPRINT_KEY) {
+  const blueprint = getBlueprint(type);
   return {
     id,
-    type,
+    type: blueprint.key,
     x,
     y,
-    data: createNodeData(type),
+    data: createBlueprintDataDefaults(blueprint),
+    runtime: {
+      components: {},
+      eventQueue: [],
+    },
+    plugins: createBlueprintPluginMounts(blueprint),
   };
 }
 
-function normalizeGraphNode(node) {
+function normalizeNode(node) {
+  const blueprint = getBlueprint(node?.type);
+  const data = node?.data && typeof node.data === "object" ? { ...node.data } : {};
   return {
     id: Number(node.id),
-    type: typeof node.type === "string" ? node.type : DEFAULT_NODE_TYPE,
+    type: blueprint.key,
     x: Number(node.x) || 0,
     y: Number(node.y) || 0,
-    data: normalizeNodeData(
-      {
-        ...node,
-        type: typeof node.type === "string" ? node.type : DEFAULT_NODE_TYPE,
-      },
-      node.data && typeof node.data === "object" ? { ...node.data } : {}
-    ),
+    data: {
+      ...createBlueprintDataDefaults(blueprint),
+      ...data,
+      messages: Array.isArray(data.messages) ? data.messages : [],
+    },
+    runtime: {
+      components:
+        node?.runtime?.components && typeof node.runtime.components === "object"
+          ? { ...node.runtime.components }
+          : {},
+      eventQueue: Array.isArray(node?.runtime?.eventQueue) ? [...node.runtime.eventQueue] : [],
+    },
+    plugins: Array.isArray(node?.plugins) && node.plugins.length
+      ? node.plugins.map((plugin) => ({
+          key: plugin.key,
+          config: plugin.config && typeof plugin.config === "object" ? { ...plugin.config } : {},
+        }))
+      : createBlueprintPluginMounts(blueprint),
   };
 }
 
@@ -53,23 +84,18 @@ function createInitialGraph() {
   };
 }
 
-function isGraphShape(value) {
-  return value && typeof value === "object" && Array.isArray(value.nodes);
-}
-
 export function normalizeGraph(input) {
-  if (!input) {
+  if (!input || typeof input !== "object" || !Array.isArray(input.nodes)) {
     return createInitialGraph();
   }
 
-  if (isGraphShape(input)) {
-    const normalized = {
-      nodes: input.nodes.map(normalizeGraphNode),
-    };
-    return assertGraphDocument(normalized);
-  }
+  return assertGraphDocument({
+    nodes: input.nodes.map(normalizeNode),
+  });
+}
 
-  return createInitialGraph();
+export function serializeGraph(graph) {
+  return serializeRuntimelessGraph(graph);
 }
 
 export function getMaxGraphId(graph) {
@@ -85,22 +111,31 @@ export function addGraphNode(graph, node) {
 }
 
 export function deleteNodeFromGraph(graph, id) {
-  const deletedNodeIds = new Set([id]);
-  const nextNodes = graph.nodes
-    .filter((node) => !deletedNodeIds.has(node.id))
-    .map((node) => {
-      pruneNodeConnections(node, deletedNodeIds);
-      return node;
-    });
+  const nextNodes = graph.nodes.filter((node) => node.id !== id);
+  nextNodes.forEach((node) => {
+    if (Array.isArray(node?.data?.links)) {
+      node.data.links = node.data.links.filter((item) => item.entityId !== id);
+    }
+  });
 
   return {
     deleted: nextNodes.length !== graph.nodes.length,
-    graph: {
-      nodes: nextNodes,
-    },
+    graph: { nodes: nextNodes },
   };
 }
 
 export function createInitialGraphDocument() {
   return createInitialGraph();
+}
+
+export function getNodeSummary(node) {
+  return typeof node?.data?.summary === "string" ? node.data.summary : "";
+}
+
+export function getNodeMessages(node) {
+  return Array.isArray(node?.data?.messages) ? node.data.messages : [];
+}
+
+export function getCanvasNodeSummary(node) {
+  return getEntityCanvasSummary(node);
 }

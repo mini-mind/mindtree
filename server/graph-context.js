@@ -14,21 +14,20 @@ function normalizeMessage(message) {
   };
 }
 
-function normalizeNodeSnapshot(node) {
-  if (!node || typeof node !== "object") {
+function normalizeEntitySnapshot(entity) {
+  if (!entity || typeof entity !== "object") {
     return null;
   }
 
-  if (!isFiniteId(node.id)) {
+  if (!isFiniteId(entity.id)) {
     return null;
   }
 
-  const data = node.data && typeof node.data === "object" ? node.data : {};
+  const data = entity.data && typeof entity.data === "object" ? entity.data : {};
   const normalizedData = { ...data };
-  delete normalizedData.taskBoards;
   return {
-    id: Number(node.id),
-    type: typeof node.type === "string" ? node.type : "note",
+    id: Number(entity.id),
+    type: typeof entity.type === "string" ? entity.type : "note",
     data: {
       ...normalizedData,
       summary: typeof normalizedData.summary === "string" ? normalizedData.summary : "",
@@ -39,27 +38,27 @@ function normalizeNodeSnapshot(node) {
   };
 }
 
-function normalizeLinkedNode(linkedNode) {
-  if (!linkedNode || typeof linkedNode !== "object") {
+function normalizeLinkedEntity(linkedEntity) {
+  if (!linkedEntity || typeof linkedEntity !== "object") {
     return null;
   }
 
-  const nodeId = Number(linkedNode.nodeId);
-  if (!isFiniteId(nodeId)) {
+  const entityId = Number(linkedEntity.entityId);
+  if (!isFiniteId(entityId)) {
     return null;
   }
 
-  const node = normalizeNodeSnapshot(linkedNode.node);
-  if (!node || node.id !== nodeId) {
+  const entity = normalizeEntitySnapshot(linkedEntity.entity);
+  if (!entity || entity.id !== entityId) {
     return null;
   }
 
   return {
-    nodeId,
-    type: typeof linkedNode.type === "string" && linkedNode.type ? linkedNode.type : "link",
-    label: typeof linkedNode.label === "string" ? linkedNode.label : "",
-    node,
-    data: linkedNode.data && typeof linkedNode.data === "object" ? { ...linkedNode.data } : {},
+    entityId,
+    type: typeof linkedEntity.type === "string" && linkedEntity.type ? linkedEntity.type : "link",
+    label: typeof linkedEntity.label === "string" ? linkedEntity.label : "",
+    entity,
+    data: linkedEntity.data && typeof linkedEntity.data === "object" ? { ...linkedEntity.data } : {},
   };
 }
 
@@ -68,23 +67,23 @@ function normalizeGraphContext(context) {
     return null;
   }
 
-  const focusNode = normalizeNodeSnapshot(context.focusNode);
-  const linkedNodes = Array.isArray(context?.linkedNodes)
-    ? context.linkedNodes.map(normalizeLinkedNode)
+  const focusEntity = normalizeEntitySnapshot(context.focusEntity);
+  const linkedEntities = Array.isArray(context?.linkedEntities)
+    ? context.linkedEntities.map(normalizeLinkedEntity)
     : [];
 
-  if (!focusNode) {
+  if (!focusEntity) {
     return null;
   }
 
-  if (linkedNodes.some((item) => !item)) {
+  if (linkedEntities.some((item) => !item)) {
     return null;
   }
 
   return {
     version: 4,
-    focusNode,
-    linkedNodes,
+    focusEntity,
+    linkedEntities,
   };
 }
 

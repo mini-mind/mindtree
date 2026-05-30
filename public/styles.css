@@ -460,6 +460,16 @@ h2 {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.node-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.node-section + .node-section {
+  margin-top: 14px;
+}
+
 .task-board-list {
   display: flex;
   flex-direction: column;

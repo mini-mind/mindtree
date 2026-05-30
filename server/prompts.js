@@ -5,9 +5,9 @@ function formatMessages(messages = []) {
     .join("\n");
 }
 
-function formatNode(node, index = null) {
-  const summary = node?.data?.summary || "";
-  const detail = formatMessages(node?.data?.messages || []);
+function formatEntity(entity, index = null) {
+  const summary = entity?.data?.summary || "";
+  const detail = formatMessages(entity?.data?.messages || []);
   const content = `${summary}\n${detail}`.trim();
   if (index === null) {
     return content;
@@ -15,14 +15,17 @@ function formatNode(node, index = null) {
   return `${index + 1}. ${content}`.trim();
 }
 
-function formatLinkedNodes(linkedNodes = []) {
-  return linkedNodes
-    .map((linkedNode, index) => `${index + 1}. [${linkedNode.type}] ${formatNode(linkedNode.node)}`.trim())
+function formatLinkedEntities(linkedEntities = []) {
+  return linkedEntities
+    .map(
+      (linkedEntity, index) =>
+        `${index + 1}. [${linkedEntity.type}] ${formatEntity(linkedEntity.entity)}`.trim()
+    )
     .join("\n\n");
 }
 
 module.exports = {
   formatMessages,
-  formatNode,
-  formatLinkedNodes,
+  formatEntity,
+  formatLinkedEntities,
 };

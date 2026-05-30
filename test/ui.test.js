@@ -223,7 +223,7 @@ test("UI flow covers help, config, graph defaults, and context menus", async () 
 
     const graph = await readStoredGraph(page);
 
-    assert.match(helpText, /节点内部维护的连接信息/);
+    assert.match(helpText, /节点会按自身的 UI 层定义展示消息、任务板、连接信息/);
     assert.equal(nodeDialogSnapshot.summaryText, "未命名节点");
     assert.match(nodeDialogSnapshot.statusText, /记录/);
     assert.equal(graph.nodes.length, 2);
@@ -354,7 +354,7 @@ test("UI minimap supports click and drag navigation", async () => {
   }
 });
 
-test("UI extracts agent-owned linked nodes", async () => {
+test("UI extracts agent-owned linked entities", async () => {
   const app = createApp({
     fetchImpl: async (url, options) => {
       if (String(url).includes("/chat/completions")) {
@@ -400,9 +400,10 @@ test("UI extracts agent-owned linked nodes", async () => {
             summary: "执行 Agent",
             messages: [],
             agentKey: "assistant",
-            taskBoards: [
+            links: [
               {
-                nodeId: 2,
+                entityId: 2,
+                type: "agent/task_board",
                 label: "执行任务",
                 config: {},
               },
@@ -442,10 +443,110 @@ test("UI extracts agent-owned linked nodes", async () => {
     const request = await requestPromise;
     const capturedContext = JSON.parse(request.postData()).context;
 
-    assert.equal(capturedContext.focusNode.data.summary, "执行 Agent");
-    assert.equal(capturedContext.linkedNodes.length, 1);
-    assert.equal(capturedContext.linkedNodes[0].type, "agent/task_board");
-    assert.equal(capturedContext.linkedNodes[0].node.data.summary, "共享任务板");
+    assert.equal(capturedContext.focusEntity.data.summary, "执行 Agent");
+    assert.equal(capturedContext.linkedEntities.length, 1);
+    assert.equal(capturedContext.linkedEntities[0].type, "agent/task_board");
+    assert.equal(capturedContext.linkedEntities[0].entity.data.summary, "共享任务板");
+  } finally {
+    await browser.close();
+    server.close();
+  }
+});
+
+test("UI agent can consume queued plugin messages before running", async () => {
+  const app = createApp({
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("/chat/completions")) {
+        const payload = JSON.parse(options.body);
+        return createJsonResponse(200, {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  message: payload.messages?.[1]?.content || "",
+                  summary: "队列输入测试",
+                }),
+              },
+            },
+          ],
+        });
+      }
+
+      return createJsonResponse(200, { choices: [] });
+    },
+  });
+  const server = app.listen(0);
+  await once(server, "listening");
+  const { port } = server.address();
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: "new",
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${port}/?test=1`, { waitUntil: "networkidle0" });
+    await seedGraph(page, {
+      nodes: [
+        {
+          id: 1,
+          type: "agent",
+          x: 0,
+          y: 0,
+          data: {
+            summary: "队列 Agent",
+            messages: [],
+            agentKey: "assistant",
+            links: [],
+          },
+        },
+      ],
+    });
+    await seedConfig(page, {
+      baseUrl: "https://api.siliconflow.cn/v1",
+      apiKey: "test-key",
+      model: "deepseek-ai/DeepSeek-V3.2",
+      agents: {
+        assistant: {},
+      },
+    });
+
+    await page.evaluate(async () => {
+      await window.__mindzooTestApi.emitNodeEvent(1, {
+        type: "message.enqueue",
+        payload: {
+          source: "planner",
+          content: "先整理目标",
+        },
+      });
+      await window.__mindzooTestApi.emitNodeEvent(1, {
+        type: "message.enqueue",
+        payload: {
+          source: "reviewer",
+          content: "补充风险检查",
+        },
+      });
+    });
+
+    await openNodeByDoubleClick(page, 1);
+    await page.waitForSelector("#node-dialog[open]");
+    const statusText = await page.$eval("#node-dialog-status", (el) => el.textContent);
+    assert.match(statusText, /当前队列 2 条/);
+
+    const requestPromise = page.waitForRequest((request) => {
+      return (
+        request.method() === "POST" &&
+        request.url() === `http://127.0.0.1:${port}/api/agent-run`
+      );
+    });
+    await page.$eval("#node-dialog-submit", (button) => button.click());
+    const request = await requestPromise;
+    const payload = JSON.parse(request.postData());
+
+    assert.match(payload.prompt, /\[planner\] 先整理目标/);
+    assert.match(payload.prompt, /\[reviewer\] 补充风险检查/);
   } finally {
     await browser.close();
     server.close();
@@ -549,7 +650,7 @@ test("UI can create and run an agent node through the node dialog", async () => 
     const agentNode = graphAfterCreate.nodes.find((node) => node.type === "agent");
     assert.ok(agentNode);
     assert.equal(agentNode.data.agentKey, "assistant");
-    assert.deepEqual(agentNode.data.taskBoards, []);
+    assert.deepEqual(agentNode.data.links, []);
 
     await openNodeByDoubleClick(page, agentNode.id);
     await page.waitForSelector("#node-dialog[open]");

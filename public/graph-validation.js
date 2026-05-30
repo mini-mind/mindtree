@@ -1,5 +1,3 @@
-import { getNodeConnections } from "./node-types.js";
-
 export class GraphValidationError extends Error {
   constructor(message) {
     super(message);
@@ -11,7 +9,7 @@ function fail(message) {
   throw new GraphValidationError(message);
 }
 
-function ensureGraphShape(graph) {
+export function assertGraphDocument(graph) {
   if (!graph || typeof graph !== "object") {
     fail("graph must be an object");
   }
@@ -19,46 +17,29 @@ function ensureGraphShape(graph) {
   if (!Array.isArray(graph.nodes)) {
     fail("graph must contain a nodes array");
   }
-}
 
-function ensureFiniteId(value, label) {
-  if (!Number.isFinite(value)) {
-    fail(`${label} must be a finite number`);
-  }
-}
-
-function ensureUniqueNodeIds(nodes) {
-  const seen = new Set();
-  nodes.forEach((node, index) => {
-    ensureFiniteId(node?.id, `nodes[${index}].id`);
-    if (seen.has(node.id)) {
+  const ids = new Set();
+  graph.nodes.forEach((node, index) => {
+    if (!Number.isFinite(node?.id)) {
+      fail(`nodes[${index}].id must be a finite number`);
+    }
+    if (ids.has(node.id)) {
       fail(`duplicate node id: ${node.id}`);
     }
-    seen.add(node.id);
+    ids.add(node.id);
   });
-}
 
-function ensureConnectionTargets(graph, nodeIds) {
-  graph.nodes.forEach((node, index) => {
-    getNodeConnections(node).forEach((connection, connectionIndex) => {
-      ensureFiniteId(
-        connection?.nodeId,
-        `nodes[${index}] linked target[${connectionIndex}].nodeId`
-      );
+  graph.nodes.forEach((node) => {
+    if (!Array.isArray(node?.data?.links)) {
+      return;
+    }
 
-      if (!nodeIds.has(connection.nodeId)) {
-        fail(`node ${node.id} links missing target node ${connection.nodeId}`);
+    node.data.links.forEach((item) => {
+      if (!ids.has(Number(item?.entityId))) {
+        fail(`entity ${node.id} links missing target entity ${item?.entityId}`);
       }
     });
   });
-}
-
-export function assertGraphDocument(graph) {
-  ensureGraphShape(graph);
-  ensureUniqueNodeIds(graph.nodes);
-
-  const nodeIds = new Set(graph.nodes.map((node) => node.id));
-  ensureConnectionTargets(graph, nodeIds);
 
   return graph;
 }

@@ -1,4 +1,4 @@
-import { getCanvasNodeSummary } from "./node-types.js";
+import { getCanvasNodeSummary } from "./graph-model.js";
 
 export const GRAPH_CANVAS_THEME = {
   nodeWidth: 220,

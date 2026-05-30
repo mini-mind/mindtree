@@ -21,10 +21,10 @@ function createJsonResponse(status, payload) {
   };
 }
 
-test("buildAgentRunPrompt includes focus node, linked nodes, and user request", () => {
+test("buildAgentRunPrompt includes focus entity, linked entities, and user request", () => {
   const prompt = buildAgentRunPrompt(
     {
-      focusNode: {
+      focusEntity: {
         id: 1,
         type: "agent",
         data: {
@@ -32,11 +32,11 @@ test("buildAgentRunPrompt includes focus node, linked nodes, and user request", 
           messages: [{ role: "agent", agent: "assistant", content: "负责分析外部依赖" }],
         },
       },
-      linkedNodes: [
+      linkedEntities: [
         {
           type: "agent/task_board",
-          nodeId: 2,
-          node: {
+          entityId: 2,
+          entity: {
             id: 2,
             type: "task_board",
             data: { summary: "共享任务板", messages: [] },
@@ -50,8 +50,8 @@ test("buildAgentRunPrompt includes focus node, linked nodes, and user request", 
   );
 
   assert.equal(prompt.system, "custom system");
-  assert.match(prompt.user, /Focus node:/);
-  assert.match(prompt.user, /Linked nodes:/);
+  assert.match(prompt.user, /Focus entity:/);
+  assert.match(prompt.user, /Linked entities:/);
   assert.match(prompt.user, /agent\/task_board/);
   assert.match(prompt.user, /User request: 请分析当前风险/);
 });
@@ -101,7 +101,7 @@ test("POST /api/agent-run validates missing context", async () => {
   }
 });
 
-test("POST /api/agent-run rejects invalid linked node snapshots", async () => {
+test("POST /api/agent-run rejects invalid linked entity snapshots", async () => {
   const app = createApp();
   const server = app.listen(0);
   await once(server, "listening");
@@ -115,12 +115,12 @@ test("POST /api/agent-run rejects invalid linked node snapshots", async () => {
         agentKey: "assistant",
         prompt: "分析风险",
         context: {
-          focusNode: {
+          focusEntity: {
             id: 1,
             type: "agent",
             data: { summary: "研究 Agent", messages: [] },
           },
-          linkedNodes: [{ type: "agent/task_board", nodeId: 2, node: null, data: {} }],
+          linkedEntities: [{ type: "agent/task_board", entityId: 2, entity: null, data: {} }],
         },
         config: { apiKey: "test-key" },
       }),
@@ -165,16 +165,16 @@ test("POST /api/agent-run uses per-agent overrides when provided", async () => {
         agentKey: "assistant",
         prompt: "请分析当前风险",
         context: {
-          focusNode: {
+          focusEntity: {
             id: 1,
             type: "agent",
             data: { summary: "研究 Agent", messages: [] },
           },
-          linkedNodes: [
+          linkedEntities: [
             {
               type: "agent/task_board",
-              nodeId: 2,
-              node: {
+              entityId: 2,
+              entity: {
                 id: 2,
                 type: "task_board",
                 data: { summary: "共享任务板", messages: [] },
@@ -228,12 +228,12 @@ test("POST /api/agent-run surfaces invalid JSON from model as 502", async () => 
         agentKey: "assistant",
         prompt: "请分析当前风险",
         context: {
-          focusNode: {
+          focusEntity: {
             id: 1,
             type: "agent",
             data: { summary: "研究 Agent", messages: [] },
           },
-          linkedNodes: [],
+          linkedEntities: [],
         },
         config: { apiKey: "test-key" },
       }),

@@ -9,7 +9,7 @@ test("SiliconFlow DeepSeek-V3.2 smoke test", async () => {
   const result = await runNodeAgent({
     agentKey: "assistant",
     context: {
-      focusNode: {
+      focusEntity: {
         id: 1,
         type: "agent",
         data: {
@@ -22,7 +22,7 @@ test("SiliconFlow DeepSeek-V3.2 smoke test", async () => {
           ],
         },
       },
-      linkedNodes: [],
+      linkedEntities: [],
     },
     prompt: "请给出下一步最小可执行建议",
     config: {
