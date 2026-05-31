@@ -4,13 +4,9 @@ const { requestModelJson } = require("./llm-client");
 const { mergeLlmConfig, resolveAgentConnection } = require("./config");
 const { formatEntity, formatLinkedEntities } = require("./prompts");
 
-function validateAgentRunInput(agentKey, context, prompt, config) {
+function validateAgentRunInput(agentKey, prompt, config) {
   if (!agentKey || typeof agentKey !== "string") {
     throw createHttpError(400, "agentKey is required");
-  }
-
-  if (!context?.focusEntity) {
-    throw createHttpError(400, "context is required");
   }
 
   if (!prompt || !String(prompt).trim()) {
@@ -50,8 +46,12 @@ async function runNodeAgent({
   fetchImpl = fetch,
 }) {
   const mergedConfig = mergeLlmConfig(config);
-  const normalizedContext = normalizeGraphContext(context);
-  validateAgentRunInput(agentKey, normalizedContext, prompt, mergedConfig);
+  const normalizedContextResult = normalizeGraphContext(context);
+  if (!normalizedContextResult.ok) {
+    throw createHttpError(400, normalizedContextResult.error);
+  }
+
+  validateAgentRunInput(agentKey, prompt, mergedConfig);
 
   const agentConfig = resolveAgentConnection(mergedConfig, agentKey);
   const result = await requestModelJson({
@@ -60,7 +60,7 @@ async function runNodeAgent({
     model: agentConfig.model,
     config: mergedConfig,
     prompt: buildAgentRunPrompt(
-      normalizedContext,
+      normalizedContextResult.context,
       prompt,
       systemPrompt || mergedConfig.assistantSystemPrompt
     ),

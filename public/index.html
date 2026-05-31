@@ -80,11 +80,11 @@
           </div>
           <div class="help-item">
             <p class="section-title">节点使用</p>
-            <p>单击节点选中，双击节点打开节点对话框。节点会按自身的 UI 层定义展示消息、任务板、连接信息或其他内嵌组件。</p>
+            <p>单击节点选中，双击节点打开节点对话框。空节点创建后可在对话框中按需挂载插件，再获得消息、任务板、Agent 或其他能力。</p>
           </div>
           <div class="help-item">
             <p class="section-title">节点记录</p>
-            <p>在节点对话框底部输入内容后，节点会交给自身的逻辑层执行 step；不同节点类型可以写入记录、追加任务项或调用模型响应。</p>
+            <p>在节点对话框底部输入内容后，节点会交给自身的逻辑层执行 step；不同插件组合可以写入记录、追加任务项或调用模型响应。</p>
           </div>
           <p id="status" class="status-chip">帮助与系统状态会显示在这里。</p>
         </div>
@@ -128,7 +128,7 @@
 
                 <label class="field">
                   <span>Base URL</span>
-                  <input id="cfg-base-url" type="text" placeholder="https://api.siliconflow.cn/v1" />
+                  <input id="cfg-base-url" type="text" />
                 </label>
 
                 <label class="field">
@@ -143,7 +143,7 @@
 
                 <label id="cfg-model-custom-field" class="field">
                   <span>Custom Model</span>
-                  <input id="cfg-model" type="text" placeholder="deepseek-ai/DeepSeek-V3.2" />
+                  <input id="cfg-model" type="text" />
                 </label>
               </div>
 
@@ -164,17 +164,27 @@
       <form method="dialog" class="config-card">
         <div class="config-head">
           <div class="node-dialog-titlebar">
-            <p class="eyebrow">Node Record</p>
+            <p class="eyebrow">Node</p>
             <h2 id="node-dialog-summary" class="node-dialog-summary-text">未命名节点</h2>
           </div>
-          <button
-            id="close-node-dialog"
-            value="cancel"
-            class="ghost-button icon-button"
-            aria-label="关闭节点编辑"
-          >
-            <span aria-hidden="true">×</span>
-          </button>
+          <div class="dialog-head-actions">
+            <button
+              id="open-plugin-backpack"
+              type="button"
+              class="ghost-button"
+              aria-label="打开插件背包"
+            >
+              插件背包
+            </button>
+            <button
+              id="close-node-dialog"
+              value="cancel"
+              class="ghost-button icon-button"
+              aria-label="关闭节点编辑"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
         </div>
 
         <div class="node-dialog-shell">
@@ -216,16 +226,54 @@
 
         <div class="create-node-layout">
           <section class="config-section">
-            <p class="section-title">节点类型</p>
-            <div id="create-node-type-list" class="option-list"></div>
+            <p class="section-title">创建空节点</p>
+            <p class="config-hint">新节点默认不预装插件。进入节点后可通过插件背包按需添加能力。</p>
           </section>
-
         </div>
-
-        <p id="create-node-description" class="config-hint">选择节点类型后创建。</p>
 
         <div class="actions actions-end">
           <button id="confirm-create-node" type="button" class="primary-button">创建</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="plugin-backpack-dialog" class="config-dialog">
+      <form method="dialog" class="config-card plugin-backpack-card">
+        <div class="config-head">
+          <div>
+            <p class="eyebrow">Plugins</p>
+            <h2>插件背包</h2>
+          </div>
+          <button
+            id="close-plugin-backpack-dialog"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭插件背包"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="plugin-backpack-shell">
+          <p id="plugin-backpack-description" class="config-hint">选择要挂载到当前节点上的插件。</p>
+          <div class="plugin-backpack-layout">
+            <section class="plugin-backpack-installed">
+              <p class="section-title">已安装插件树</p>
+              <div id="plugin-installed-tree" class="plugin-tree"></div>
+            </section>
+
+            <section class="plugin-backpack-browser">
+              <div id="plugin-backpack-target" class="plugin-backpack-target"></div>
+              <div id="plugin-config-panel" class="plugin-config-panel" hidden></div>
+              <div id="plugin-backpack-list" class="option-list"></div>
+            </section>
+          </div>
+        </div>
+
+        <div class="actions actions-end">
+          <button id="remove-selected-plugin" type="button" class="secondary-button">移除插件</button>
+          <button id="close-plugin-backpack-action" type="button" class="secondary-button">关闭</button>
+          <button id="attach-selected-plugin" type="button" class="primary-button">添加插件</button>
         </div>
       </form>
     </dialog>

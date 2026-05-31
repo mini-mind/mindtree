@@ -1,4 +1,4 @@
-import { getCanvasNodeSummary, getNodePosition } from "./graph-model.js";
+import { getNodePosition } from "./graph-model.js";
 
 export const GRAPH_CANVAS_THEME = {
   nodeWidth: 220,
@@ -40,6 +40,7 @@ function getCenter(pointA, pointB) {
 export function createGraphCanvas(
   canvas,
   {
+    getNodeSummary,
     onNodeSelect,
     onNodesSelect,
     onNodeOpen,
@@ -50,9 +51,6 @@ export function createGraphCanvas(
   }
 ) {
   const ctx = canvas.getContext("2d");
-  const animation = {
-    frameId: null,
-  };
   const view = {
     scale: 1,
     offsetX: window.innerWidth * 0.42,
@@ -147,7 +145,7 @@ export function createGraphCanvas(
     const layout = new Map();
 
     graph.nodes.forEach((node) => {
-      const summaryRows = truncateRows(getCanvasNodeSummary(node), 18, 3);
+      const summaryRows = truncateRows(getNodeSummary(node), 18, 3);
       const width = GRAPH_CANVAS_THEME.nodeWidth;
       const height = Math.max(GRAPH_CANVAS_THEME.nodeMinHeight, 46 + summaryRows.length * 18);
       const position = getNodePosition(node);
@@ -595,11 +593,6 @@ export function createGraphCanvas(
     drawMinimap(layout, bounds, width, height);
   }
 
-  function tick() {
-    draw();
-    animation.frameId = window.requestAnimationFrame(tick);
-  }
-
   function resize() {
     const ratio = window.devicePixelRatio || 1;
     canvas.width = window.innerWidth * ratio;
@@ -980,10 +973,6 @@ export function createGraphCanvas(
     },
     { passive: false }
   );
-
-  if (animation.frameId === null) {
-    animation.frameId = window.requestAnimationFrame(tick);
-  }
 
   return {
     resize,

@@ -1,12 +1,16 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
+const { buildAgentRunPrompt } = require("../server/agent-service");
+const { createApp } = require("../server/routes");
+const { GRAPH_CONTEXT_VERSION } = require("../server/graph-context");
+const { DEFAULT_LLM_CONFIG } = require("../llm-defaults");
+const { MODEL_CAPABILITIES } = require("../model-capabilities");
 const {
-  buildAgentRunPrompt,
-  createApp,
-  DEFAULT_LLM_CONFIG,
-  MODEL_CAPABILITIES,
-} = require("../server-app");
+  createAgentContext,
+  createEntitySnapshot,
+  createLinkedEntity,
+} = require("./helpers/agent-context");
 
 function createJsonResponse(status, payload) {
   return {
@@ -23,28 +27,19 @@ function createJsonResponse(status, payload) {
 
 test("buildAgentRunPrompt includes focus entity, linked entities, and user request", () => {
   const prompt = buildAgentRunPrompt(
-    {
-      focusEntity: {
-        id: 1,
-        type: "agent",
-        data: {
-          summary: "研究 Agent",
-          messages: [{ role: "agent", agent: "assistant", content: "负责分析外部依赖" }],
-        },
-      },
+    createAgentContext({
+      focusEntity: createEntitySnapshot(1, {
+        summary: "研究 Agent",
+        messages: [{ role: "agent", agent: "assistant", content: "负责分析外部依赖" }],
+      }),
       linkedEntities: [
-        {
+        createLinkedEntity(2, {
           type: "agent/task_board",
-          entityId: 2,
-          entity: {
-            id: 2,
-            type: "task_board",
-            data: { summary: "共享任务板", messages: [] },
-          },
-          data: { label: "执行任务" },
-        },
+          label: "执行任务",
+          entity: createEntitySnapshot(2, { summary: "共享任务板", messages: [] }),
+        }),
       ],
-    },
+    }),
     "请分析当前风险",
     "custom system"
   );
@@ -114,13 +109,40 @@ test("POST /api/agent-run rejects invalid linked entity snapshots", async () => 
       body: JSON.stringify({
         agentKey: "assistant",
         prompt: "分析风险",
+        context: createAgentContext({
+          focusEntity: createEntitySnapshot(1, { summary: "研究 Agent", messages: [] }),
+          linkedEntities: [{ type: "agent/task_board", entityId: 2, entity: null }],
+        }),
+        config: { apiKey: "test-key" },
+      }),
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(data.error, "linkedEntities contain invalid snapshots");
+  } finally {
+    server.close();
+  }
+});
+
+test("POST /api/agent-run rejects unsupported context version", async () => {
+  const app = createApp();
+  const server = app.listen(0);
+  await once(server, "listening");
+  const { port } = server.address();
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/agent-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentKey: "assistant",
+        prompt: "分析风险",
         context: {
-          focusEntity: {
-            id: 1,
-            type: "agent",
-            data: { summary: "研究 Agent", messages: [] },
-          },
-          linkedEntities: [{ type: "agent/task_board", entityId: 2, entity: null, data: {} }],
+          ...createAgentContext({
+            focusEntity: createEntitySnapshot(1, { summary: "研究 Agent", messages: [] }),
+          }),
+          version: GRAPH_CONTEXT_VERSION + 1,
         },
         config: { apiKey: "test-key" },
       }),
@@ -128,7 +150,7 @@ test("POST /api/agent-run rejects invalid linked entity snapshots", async () => 
     const data = await response.json();
 
     assert.equal(response.status, 400);
-    assert.equal(data.error, "context is required");
+    assert.equal(data.error, `context version must be ${GRAPH_CONTEXT_VERSION}`);
   } finally {
     server.close();
   }
@@ -164,25 +186,16 @@ test("POST /api/agent-run uses per-agent overrides when provided", async () => {
       body: JSON.stringify({
         agentKey: "assistant",
         prompt: "请分析当前风险",
-        context: {
-          focusEntity: {
-            id: 1,
-            type: "agent",
-            data: { summary: "研究 Agent", messages: [] },
-          },
+        context: createAgentContext({
+          focusEntity: createEntitySnapshot(1, { summary: "研究 Agent", messages: [] }),
           linkedEntities: [
-            {
+            createLinkedEntity(2, {
               type: "agent/task_board",
-              entityId: 2,
-              entity: {
-                id: 2,
-                type: "task_board",
-                data: { summary: "共享任务板", messages: [] },
-              },
-              data: { label: "执行任务" },
-            },
+              label: "执行任务",
+              entity: createEntitySnapshot(2, { summary: "共享任务板", messages: [] }),
+            }),
           ],
-        },
+        }),
         config: {
           baseUrl: "https://base.example/v1",
           apiKey: "base-key",
@@ -227,14 +240,9 @@ test("POST /api/agent-run surfaces invalid JSON from model as 502", async () => 
       body: JSON.stringify({
         agentKey: "assistant",
         prompt: "请分析当前风险",
-        context: {
-          focusEntity: {
-            id: 1,
-            type: "agent",
-            data: { summary: "研究 Agent", messages: [] },
-          },
-          linkedEntities: [],
-        },
+        context: createAgentContext({
+          focusEntity: createEntitySnapshot(1, { summary: "研究 Agent", messages: [] }),
+        }),
         config: { apiKey: "test-key" },
       }),
     });

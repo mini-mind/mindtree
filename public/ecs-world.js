@@ -1,16 +1,10 @@
-import { createComponentBag } from "./ecs-components.js";
 import { getEcsPlugin } from "./ecs-plugin-registry.js";
-
-function normalizePluginMount(mount) {
-  if (!mount || typeof mount !== "object" || typeof mount.key !== "string" || !mount.key) {
-    return null;
-  }
-
-  return {
-    key: mount.key,
-    config: mount.config && typeof mount.config === "object" ? { ...mount.config } : {},
-  };
-}
+import {
+  getEntityPluginMounts,
+  listEntityPluginEntries,
+  listEntityPluginEntriesPostOrder,
+  normalizePluginMount,
+} from "./ecs-plugin-tree.js";
 
 function ensureRuntimeNode(node) {
   if (!node.runtime || typeof node.runtime !== "object") {
@@ -28,6 +22,23 @@ function ensureRuntimeNode(node) {
   return node.runtime;
 }
 
+function ensureRuntimeLifecycle(node) {
+  const runtime = ensureRuntimeNode(node);
+  if (!runtime.lifecycle || typeof runtime.lifecycle !== "object") {
+    runtime.lifecycle = {};
+  }
+
+  if (typeof runtime.lifecycle.mountSignature !== "string") {
+    runtime.lifecycle.mountSignature = "";
+  }
+
+  return runtime.lifecycle;
+}
+
+function getEntityMountSignature(entity) {
+  return JSON.stringify(getEntityPluginMounts(entity).map(normalizePluginMount));
+}
+
 export function createWorld(graph, services) {
   return {
     graph,
@@ -38,12 +49,6 @@ export function createWorld(graph, services) {
 
 export function getEntityById(world, entityId) {
   return world.graph.nodes.find((node) => node.id === entityId) || null;
-}
-
-export function getEntityPluginMounts(entity) {
-  return Array.isArray(entity?.plugins)
-    ? entity.plugins.map(normalizePluginMount).filter(Boolean)
-    : [];
 }
 
 export function ensureEntityRuntime(entity) {
@@ -59,27 +64,45 @@ export function ensureEntityRuntimeComponent(entity, pluginKey, createValue = ()
   return runtime.components[pluginKey];
 }
 
+export function getEntityRuntimeComponent(entity, pluginKey) {
+  return ensureEntityRuntime(entity).components[pluginKey] || null;
+}
+
 export async function initializeEntity(world, entity) {
   ensureEntityRuntime(entity);
-  for (const mount of getEntityPluginMounts(entity)) {
-    const plugin = getEcsPlugin(mount.key);
+  const lifecycle = ensureRuntimeLifecycle(entity);
+  const nextMountSignature = getEntityMountSignature(entity);
+  if (lifecycle.mountSignature === nextMountSignature) {
+    return false;
+  }
+
+  for (const entry of listEntityPluginEntries(entity)) {
+    const plugin = getEcsPlugin(entry.mount.key);
     if (!plugin) {
       continue;
     }
 
     if (typeof plugin.createRuntimeComponent === "function") {
-      ensureEntityRuntimeComponent(entity, mount.key, () => plugin.createRuntimeComponent(mount, entity));
+      ensureEntityRuntimeComponent(entity, entry.path, () =>
+        plugin.createRuntimeComponent(entry.mount, entity)
+      );
     }
 
     if (typeof plugin.init === "function") {
       await plugin.init({
         world,
         entity,
-        mount,
-        runtimeComponent: ensureEntityRuntimeComponent(entity, mount.key),
+        mount: entry.mount,
+        runtimeComponent: ensureEntityRuntimeComponent(entity, entry.path),
+        mountPath: entry.path,
+        targetPath: entry.parentPath,
+        parentMount: entry.parentMount,
       });
     }
   }
+
+  lifecycle.mountSignature = nextMountSignature;
+  return true;
 }
 
 export function enqueueEntityEvent(entity, event) {
@@ -111,48 +134,38 @@ export async function stepWorld(world, maxEvents = 100) {
       const event = runtime.eventQueue.shift();
       processed += 1;
 
-      for (const mount of getEntityPluginMounts(entity)) {
-        const plugin = getEcsPlugin(mount.key);
+      for (const entry of listEntityPluginEntriesPostOrder(entity)) {
+        const plugin = getEcsPlugin(entry.mount.key);
         if (typeof plugin?.onEvent === "function") {
           await plugin.onEvent({
             world,
             entity,
             event,
-            mount,
-            runtimeComponent: ensureEntityRuntimeComponent(entity, mount.key),
+            mount: entry.mount,
+            runtimeComponent: ensureEntityRuntimeComponent(entity, entry.path),
+            mountPath: entry.path,
+            targetPath: entry.parentPath,
+            parentMount: entry.parentMount,
           });
         }
       }
     }
 
-    for (const mount of getEntityPluginMounts(entity)) {
-      const plugin = getEcsPlugin(mount.key);
+    for (const entry of listEntityPluginEntries(entity)) {
+      const plugin = getEcsPlugin(entry.mount.key);
       if (typeof plugin?.step === "function") {
         await plugin.step({
           world,
           entity,
-          mount,
-          runtimeComponent: ensureEntityRuntimeComponent(entity, mount.key),
+          mount: entry.mount,
+          runtimeComponent: ensureEntityRuntimeComponent(entity, entry.path),
+          mountPath: entry.path,
+          targetPath: entry.parentPath,
+          parentMount: entry.parentMount,
         });
       }
     }
   }
 
   return processed;
-}
-
-export function serializeRuntimelessGraph(graph) {
-  return {
-    nodes: graph.nodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      data: node.data && typeof node.data === "object" ? { ...node.data } : createComponentBag(),
-      plugins: Array.isArray(node.plugins)
-        ? node.plugins.map((plugin) => ({
-            key: plugin.key,
-            config: plugin.config && typeof plugin.config === "object" ? { ...plugin.config } : {},
-          }))
-        : [],
-    })),
-  };
 }

@@ -1,128 +1,42 @@
 import { registerEcsPlugin } from "./ecs-plugin-registry.js";
-import { registerEcsUiComponent } from "./ecs-ui-registry.js";
 import {
-  emitEntityEvent,
-  ensureEntityRuntimeComponent,
-  getEntityById,
-} from "./ecs-world.js";
+  getEntityLinks,
+  getMessages,
+  getTaskBoardItems,
+  getSummary,
+  setDialogStatus,
+  setMessages,
+  setNodeUiBlocks,
+  setNodeUiCanvasSummary,
+  setNodeUiComposer,
+  setNodeUiMessageLabels,
+  setSummary,
+} from "./ecs-entity-state.js";
+import { ensureEntityRuntimeComponent, getEntityRuntimeComponent } from "./ecs-world.js";
 
-function getMessages(entity) {
-  return Array.isArray(entity?.data?.messages) ? entity.data.messages : [];
+function getMountRuntime(entity, mountPath) {
+  return ensureEntityRuntimeComponent(entity, mountPath, () => ({}));
 }
 
-function setMessages(entity, messages) {
-  entity.data.messages = Array.isArray(messages) ? messages : [];
-}
-
-function getSummary(entity, fallback = "") {
-  return typeof entity?.data?.summary === "string" ? entity.data.summary : fallback;
-}
-
-function setSummary(entity, summary) {
-  entity.data.summary = typeof summary === "string" ? summary : "";
-}
-
-function getTaskBoardItems(entity) {
-  return Array.isArray(entity?.data?.items) ? entity.data.items : [];
-}
-
-function getEntityLinks(entity) {
-  return Array.isArray(entity?.data?.links) ? entity.data.links : [];
-}
-
-function setDialogStatus(entity, statusMessage) {
-  const dialogRuntime = ensureEntityRuntimeComponent(entity, "dialog-ui", () => ({
-    statusMessage: "",
-  }));
-  dialogRuntime.statusMessage = statusMessage;
-}
-
-registerEcsUiComponent("messageThread", ({ entity, elements, helpers }) => {
-  const list = document.createElement("div");
-  list.className = "message-thread";
-
-  getMessages(entity).forEach((message) => {
-    const article = document.createElement("article");
-    article.className = `message-card is-${message.role}`;
-
-    const meta = document.createElement("div");
-    meta.className = "message-meta";
-    meta.textContent = helpers.getMessageLabel(entity, message);
-    article.appendChild(meta);
-
-    const body = document.createElement("p");
-    body.className = "message-body";
-    body.textContent = message.content;
-    article.appendChild(body);
-
-    list.appendChild(article);
-  });
-
-  elements.nodeDialogMessages.appendChild(list);
-});
-
-registerEcsUiComponent("entityLinks", ({ entity, panel }) => {
-  const items = getEntityLinks(entity);
-  if (!items.length) {
-    return;
+function getRequiredRuntimeComponent(entity, pluginKey) {
+  const runtimeComponent = getEntityRuntimeComponent(entity, pluginKey);
+  if (runtimeComponent) {
+    return runtimeComponent;
   }
 
-  const section = document.createElement("section");
-  section.className = "node-section";
-  const title = document.createElement("div");
-  title.className = "message-meta";
-  title.textContent = `关联节点 ${items.length} 个`;
-  section.appendChild(title);
-
-  const list = document.createElement("div");
-  list.className = "task-board-list";
-  items.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "task-board-item";
-    row.innerHTML = `
-      <span class="task-board-item-status">-></span>
-      <span>${item.type || "link"}: #${item.entityId}${item.label ? ` (${item.label})` : ""}</span>
-    `;
-    list.appendChild(row);
-  });
-  section.appendChild(list);
-  panel.appendChild(section);
-});
-
-registerEcsUiComponent("taskBoardItems", ({ entity, panel }) => {
-  const items = getTaskBoardItems(entity);
-  const section = document.createElement("section");
-  section.className = "node-section";
-  const title = document.createElement("div");
-  title.className = "message-meta";
-  title.textContent = `任务项 ${items.length} 条`;
-  section.appendChild(title);
-
-  const list = document.createElement("div");
-  list.className = "task-board-list";
-  items.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "task-board-item";
-    row.innerHTML = `
-      <span class="task-board-item-status">${item.status === "done" ? "[x]" : "[ ]"}</span>
-      <span>${item.text}</span>
-    `;
-    list.appendChild(row);
-  });
-
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "task-board-item";
-    empty.innerHTML = `<span class="task-board-item-status">[ ]</span><span>暂无任务项</span>`;
-    list.appendChild(empty);
-  }
-
-  section.appendChild(list);
-  panel.appendChild(section);
-});
+  throw new Error(`缺少必需插件运行时：${pluginKey}`);
+}
 
 registerEcsPlugin({
   key: "summary-capability",
+  meta: {
+    label: "摘要能力",
+    description: "为节点提供摘要字段。",
+    category: "foundation",
+    mountTargets: ["node"],
+    selectable: false,
+    defaultConfig: { defaultSummary: "" },
+  },
   init({ entity, mount }) {
     if (typeof entity.data.summary !== "string") {
       entity.data.summary = mount.config?.defaultSummary || "";
@@ -132,6 +46,13 @@ registerEcsPlugin({
 
 registerEcsPlugin({
   key: "message-log-capability",
+  meta: {
+    label: "消息记录",
+    description: "为节点提供消息日志。",
+    category: "foundation",
+    mountTargets: ["node"],
+    selectable: false,
+  },
   init({ entity }) {
     if (!Array.isArray(entity.data.messages)) {
       entity.data.messages = [];
@@ -148,6 +69,14 @@ registerEcsPlugin({
 
 registerEcsPlugin({
   key: "entity-links-capability",
+  meta: {
+    label: "连接能力",
+    description: "允许节点维护对其他实体的连接。",
+    category: "capability",
+    mountTargets: ["node"],
+    selectable: false,
+    defaultConfig: { sourceField: "links" },
+  },
   init({ entity, mount }) {
     const sourceField = mount.config?.sourceField || "links";
     if (!Array.isArray(entity.data[sourceField])) {
@@ -158,6 +87,15 @@ registerEcsPlugin({
 
 registerEcsPlugin({
   key: "task-board-capability",
+  meta: {
+    label: "待办清单",
+    description: "为节点提供任务项列表。",
+    category: "capability",
+    mountTargets: ["node"],
+    selectable: false,
+    conflicts: ["agent-behavior"],
+    provides: ["task-node"],
+  },
   init({ entity }) {
     if (!Array.isArray(entity.data.items)) {
       entity.data.items = [];
@@ -167,6 +105,14 @@ registerEcsPlugin({
 
 registerEcsPlugin({
   key: "message-queue-capability",
+  meta: {
+    label: "消息队列",
+    description: "为节点提供运行时消息队列。",
+    category: "runtime",
+    mountTargets: ["node"],
+    selectable: false,
+    requires: ["agent-node"],
+  },
   createRuntimeComponent() {
     return {
       queue: [],
@@ -185,23 +131,30 @@ registerEcsPlugin({
 });
 
 registerEcsPlugin({
-  key: "dialog-ui",
-  createRuntimeComponent() {
-    return {
-      statusMessage: "",
-    };
-  },
-  init({ mount, runtimeComponent }) {
-    if (!runtimeComponent.statusMessage) {
-      runtimeComponent.statusMessage = mount.config?.initialStatus || "";
-    }
-  },
-});
-
-registerEcsPlugin({
   key: "note-behavior",
+  meta: {
+    label: "记录行为",
+    description: "让节点以记录模式接收和展示文本。",
+    category: "behavior",
+    mountTargets: ["node"],
+    conflicts: ["agent-behavior", "task-board-behavior"],
+    requires: ["summary-capability", "message-log-capability"],
+    provides: ["record-node"],
+    dialog: { submit: true },
+  },
   init({ entity }) {
+    setNodeUiBlocks(entity, ["messageThread"]);
+    setNodeUiComposer(entity, "输入一条记录、问题或说明", "发送");
+    setNodeUiMessageLabels(entity, {
+      user: "输入",
+      agent: "记录",
+      agentWithNameTemplate: "{agent} Agent",
+    });
+    setNodeUiCanvasSummary(entity, getSummary(entity));
+  },
+  step({ entity }) {
     setDialogStatus(entity, "输入一条记录、问题或说明后发送到当前节点。");
+    setNodeUiCanvasSummary(entity, getSummary(entity));
   },
   onEvent({ entity, event }) {
     if (event.type !== "dialog.submit") {
@@ -233,8 +186,33 @@ registerEcsPlugin({
 
 registerEcsPlugin({
   key: "task-board-behavior",
+  meta: {
+    label: "待办行为",
+    description: "让节点以待办清单模式工作。",
+    category: "behavior",
+    mountTargets: ["node"],
+    conflicts: ["agent-behavior", "note-behavior"],
+    requires: ["summary-capability", "message-log-capability", "task-board-capability"],
+    provides: ["task-node"],
+    dialog: { submit: true },
+  },
   init({ entity }) {
+    setNodeUiBlocks(entity, ["taskBoardItems", "messageThread"]);
+    setNodeUiComposer(entity, "输入一条任务内容", "记入");
+    setNodeUiMessageLabels(entity, {
+      user: "新增任务",
+      agent: "任务板记录",
+      agentWithNameTemplate: "{agent} Agent",
+    });
+    setNodeUiCanvasSummary(entity, getSummary(entity));
+  },
+  step({ entity }) {
     const openCount = getTaskBoardItems(entity).filter((item) => item.status !== "done").length;
+    const preview = getTaskBoardItems(entity)
+      .slice(0, 2)
+      .map((item) => `${item.status === "done" ? "[x]" : "[ ]"}${item.text}`)
+      .join(" ");
+    setNodeUiCanvasSummary(entity, preview ? `${getSummary(entity)} ${preview}`.trim() : getSummary(entity));
     setDialogStatus(entity, `输入一条任务后加入任务板。当前待办 ${openCount} 项。`);
   },
   onEvent({ entity, event }) {
@@ -276,22 +254,44 @@ registerEcsPlugin({
 
 registerEcsPlugin({
   key: "agent-behavior",
+  meta: {
+    label: "Agent 行为",
+    description: "让节点具备调用模型并产出响应的能力。",
+    category: "behavior",
+    mountTargets: ["node"],
+    conflicts: ["task-board-behavior", "note-behavior"],
+    requires: [
+      "summary-capability",
+      "message-log-capability",
+      "entity-links-capability",
+      "message-queue-capability",
+    ],
+    provides: ["agent-node"],
+    defaultConfig: { agentKeyField: "agentKey" },
+    dialog: { submit: true },
+  },
   init({ entity }) {
-    const queueComponent = ensureEntityRuntimeComponent(entity, "message-queue-capability", () => ({
-      queue: [],
-    }));
-    const queued = Array.isArray(queueComponent.queue) ? queueComponent.queue.length : 0;
-    const suffix = queued > 0 ? ` 当前队列 ${queued} 条。` : "";
-    setDialogStatus(entity, `输入新的任务或问题后，调用 ${entity.data?.agentKey || "assistant"} agent 响应这个节点。${suffix}`);
+    if (typeof entity.data.agentKey !== "string" || !entity.data.agentKey) {
+      entity.data.agentKey = "assistant";
+    }
+    if (!Array.isArray(entity.data.links)) {
+      entity.data.links = [];
+    }
+    setNodeUiBlocks(entity, ["entityLinks", "messageThread"]);
+    setNodeUiComposer(entity, "输入这次希望 agent 处理的任务", "运行");
+    setNodeUiMessageLabels(entity, {
+      user: "任务输入",
+      agent: "Agent 输出",
+      agentWithNameTemplate: "{agent} Agent",
+    });
+    setNodeUiCanvasSummary(entity, getSummary(entity));
   },
   async onEvent({ world, entity, event, runtimeComponent }) {
     if (event.type !== "dialog.submit") {
       return;
     }
 
-    const queueComponent = ensureEntityRuntimeComponent(entity, "message-queue-capability", () => ({
-      queue: [],
-    }));
+    const queueComponent = getRequiredRuntimeComponent(entity, "message-queue-capability");
     const queued = Array.isArray(queueComponent.queue) ? [...queueComponent.queue] : [];
     queueComponent.queue = [];
 
@@ -364,11 +364,10 @@ registerEcsPlugin({
     }
   },
   step({ entity, runtimeComponent }) {
-    const queueComponent = ensureEntityRuntimeComponent(entity, "message-queue-capability", () => ({
-      queue: [],
-    }));
+    const queueComponent = getRequiredRuntimeComponent(entity, "message-queue-capability");
     const queued = Array.isArray(queueComponent.queue) ? queueComponent.queue.length : 0;
     const suffix = queued > 0 ? ` 当前队列 ${queued} 条。` : "";
+    setNodeUiCanvasSummary(entity, getSummary(entity));
     runtimeComponent.statusMessage = `输入新的任务或问题后，调用 ${
       entity.data?.agentKey || "assistant"
     } agent 响应这个节点。${suffix}`;
@@ -376,108 +375,45 @@ registerEcsPlugin({
   },
 });
 
-export function getEntityDialogTitle(entity) {
-  return getSummary(entity) || "未命名节点";
-}
-
-export function getEntityCanvasSummary(entity) {
-  if (Array.isArray(entity?.data?.items)) {
-    const preview = entity.data.items
-      .slice(0, 2)
-      .map((item) => `${item.status === "done" ? "[x]" : "[ ]"}${item.text}`)
-      .join(" ");
-    return preview ? `${getSummary(entity)} ${preview}` : getSummary(entity);
-  }
-
-  return getSummary(entity);
-}
-
-export function getEntityMessageLabel(entity, message) {
-  if (Array.isArray(entity?.data?.items)) {
-    return message.role === "user" ? "新增任务" : "任务板记录";
-  }
-
-  if (entity?.type === "agent") {
-    if (message.role === "user") {
-      return "任务输入";
-    }
-    return message.agent ? `${message.agent} Agent` : "Agent 输出";
-  }
-
-  if (message.role === "user") {
-    return "输入";
-  }
-
-  return message.agent ? `${message.agent} Agent` : "记录";
-}
-
-export function getEntityDialogConfig(entity) {
-  const mount = Array.isArray(entity?.plugins)
-    ? entity.plugins.find((plugin) => plugin.key === "dialog-ui")
-    : null;
-  return mount?.config || { body: ["messageThread"], composer: { placeholder: "", actionLabel: "发送" } };
-}
-
-export async function dispatchDialogSubmit(world, entity, input) {
-  const event = {
-    type: "dialog.submit",
-    payload: { input },
-    meta: { result: null },
-  };
-  const handled = emitEntityEvent(world, entity.id, event);
-  if (!handled) {
-    return {
-      ok: false,
-      isError: true,
-      statusMessage: "节点不存在。",
-    };
-  }
-
-  await world.services.step();
-  return event.meta.result || {
-    ok: true,
-    statusMessage: "",
-  };
-}
-
-export function buildEntityContext(graph, entity) {
-  const linkedEntities = getEntityLinks(entity)
-    .map((item) => {
-      const target = getEntityById({ graph }, item.entityId);
-      return target
-        ? {
-            entityId: item.entityId,
-            type: item.type || "link",
-            label: item.label || "",
-            entity: {
-              id: target.id,
-              type: target.type,
-              data: {
-                ...target.data,
-                summary: getSummary(target),
-                messages: getMessages(target),
-              },
-            },
-            data: {
-              label: item.label || "",
-              config: item.config && typeof item.config === "object" ? { ...item.config } : {},
-            },
-          }
-        : null;
-    })
-    .filter(Boolean);
-
-  return {
-    version: 4,
-    focusEntity: {
-      id: entity.id,
-      type: entity.type,
-      data: {
-        ...entity.data,
-        summary: getSummary(entity),
-        messages: getMessages(entity),
-      },
+registerEcsPlugin({
+  key: "agent-analysis-skill",
+  meta: {
+    label: "分析技能",
+    description: "为 Agent 输入增加结构化分析前缀，适合规划、审查和拆解任务。",
+    category: "skill",
+    mountTargets: ["agent-behavior"],
+    defaultConfig: {
+      prefix: "请先进行目标拆解、约束检查、风险识别，再给出执行建议：",
     },
-    linkedEntities,
-  };
-}
+    configFields: [
+      {
+        key: "prefix",
+        label: "分析前缀",
+        type: "textarea",
+        placeholder: "输入要自动加在用户输入前面的分析提示词",
+        description: "每次提交前都会先注入这段前缀。",
+      },
+    ],
+  },
+  init({ entity, mountPath, mount }) {
+    const runtimeComponent = getMountRuntime(entity, mountPath);
+    runtimeComponent.prefix = mount.config?.prefix || "";
+  },
+  onEvent({ entity, event, runtimeComponent }) {
+    if (event.type !== "dialog.submit") {
+      return;
+    }
+
+    const text = String(event.payload?.input || "").trim();
+    const prefix = runtimeComponent.prefix || "";
+    if (!text || !prefix) {
+      return;
+    }
+
+    event.payload.input = `${prefix}\n${text}`;
+    setDialogStatus(entity, "已通过分析技能增强本轮输入。");
+  },
+  step({ mount, runtimeComponent }) {
+    runtimeComponent.prefix = mount.config?.prefix || "";
+  },
+});

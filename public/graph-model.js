@@ -1,63 +1,41 @@
 import { assertGraphDocument } from "./graph-validation.js";
-import { BASE_NODE_BLUEPRINTS } from "./ecs-defaults.js";
-import { getEntityCanvasSummary } from "./ecs-plugins.js";
-import { serializeRuntimelessGraph } from "./ecs-world.js";
+import { createDefaultNodeUi } from "./ecs-entity-state.js";
+import { normalizePluginMount } from "./ecs-plugin-tree.js";
 
-const DEFAULT_BLUEPRINT_KEY = "note";
-
-function getBlueprint(type = DEFAULT_BLUEPRINT_KEY) {
-  return BASE_NODE_BLUEPRINTS.find((item) => item.key === type) || BASE_NODE_BLUEPRINTS[0];
-}
-
-function createBlueprintDataDefaults(blueprint) {
+function createDefaultNodeData() {
   return {
     x: 0,
     y: 0,
-    summary:
-      blueprint.key === "agent"
-        ? "新 Agent"
-        : blueprint.key === "task_board"
-          ? "共享任务板"
-          : "",
+    summary: "",
     messages: [],
-    ...(blueprint.key === "agent"
-      ? { agentKey: "assistant", links: [] }
-      : blueprint.key === "task_board"
-        ? { items: [] }
-        : {}),
   };
 }
 
-function createBlueprintPluginMounts(blueprint) {
-  return blueprint.plugins.map((plugin) => ({
-    key: plugin.key,
-    config: plugin.config && typeof plugin.config === "object" ? { ...plugin.config } : {},
-  }));
+function createEmptyNodeRuntime() {
+  return {
+    components: {},
+    eventQueue: [],
+  };
 }
 
-export function createNode(id, x = 0, y = 0, type = DEFAULT_BLUEPRINT_KEY) {
-  const blueprint = getBlueprint(type);
+export function createNode(id, x = 0, y = 0) {
   return {
     id,
-    type: blueprint.key,
     data: {
-      ...createBlueprintDataDefaults(blueprint),
+      ...createDefaultNodeData(),
       x,
       y,
     },
-    runtime: {
-      components: {},
-      eventQueue: [],
-    },
-    plugins: createBlueprintPluginMounts(blueprint),
+    runtime: createEmptyNodeRuntime(),
+    ui: createDefaultNodeUi(),
+    mounts: [],
   };
 }
 
 function normalizeNode(node) {
-  const blueprint = getBlueprint(node?.type);
   const data = node?.data && typeof node.data === "object" ? { ...node.data } : {};
   const normalizedData = {
-    ...createBlueprintDataDefaults(blueprint),
+    ...createDefaultNodeData(),
     ...data,
     x: Number(data.x) || 0,
     y: Number(data.y) || 0,
@@ -65,21 +43,12 @@ function normalizeNode(node) {
   };
   return {
     id: Number(node.id),
-    type: blueprint.key,
     data: normalizedData,
-    runtime: {
-      components:
-        node?.runtime?.components && typeof node.runtime.components === "object"
-          ? { ...node.runtime.components }
-          : {},
-      eventQueue: Array.isArray(node?.runtime?.eventQueue) ? [...node.runtime.eventQueue] : [],
-    },
-    plugins: Array.isArray(node?.plugins) && node.plugins.length
-      ? node.plugins.map((plugin) => ({
-          key: plugin.key,
-          config: plugin.config && typeof plugin.config === "object" ? { ...plugin.config } : {},
-        }))
-      : createBlueprintPluginMounts(blueprint),
+    runtime: createEmptyNodeRuntime(),
+    ui: createDefaultNodeUi(),
+    mounts: Array.isArray(node?.mounts) && node.mounts.length
+      ? node.mounts.map(normalizePluginMount).filter(Boolean)
+      : [],
   };
 }
 
@@ -100,7 +69,15 @@ export function normalizeGraph(input) {
 }
 
 export function serializeGraph(graph) {
-  return serializeRuntimelessGraph(graph);
+  return {
+    nodes: graph.nodes.map((node) => ({
+      id: node.id,
+      data: node.data && typeof node.data === "object" ? { ...node.data } : {},
+      mounts: Array.isArray(node?.mounts)
+        ? node.mounts.map(normalizePluginMount).filter(Boolean)
+        : [],
+    })),
+  };
 }
 
 export function getMaxGraphId(graph) {
@@ -133,21 +110,9 @@ export function createInitialGraphDocument() {
   return createInitialGraph();
 }
 
-export function getNodeSummary(node) {
-  return typeof node?.data?.summary === "string" ? node.data.summary : "";
-}
-
-export function getNodeMessages(node) {
-  return Array.isArray(node?.data?.messages) ? node.data.messages : [];
-}
-
 export function getNodePosition(node) {
   return {
     x: Number(node?.data?.x) || 0,
     y: Number(node?.data?.y) || 0,
   };
-}
-
-export function getCanvasNodeSummary(node) {
-  return getEntityCanvasSummary(node);
 }

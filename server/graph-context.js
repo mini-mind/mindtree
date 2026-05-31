@@ -1,3 +1,5 @@
+const GRAPH_CONTEXT_VERSION = 4;
+
 function isFiniteId(value) {
   return Number.isFinite(value);
 }
@@ -24,15 +26,12 @@ function normalizeEntitySnapshot(entity) {
   }
 
   const data = entity.data && typeof entity.data === "object" ? entity.data : {};
-  const normalizedData = { ...data };
   return {
     id: Number(entity.id),
-    type: typeof entity.type === "string" ? entity.type : "note",
     data: {
-      ...normalizedData,
-      summary: typeof normalizedData.summary === "string" ? normalizedData.summary : "",
-      messages: Array.isArray(normalizedData.messages)
-        ? normalizedData.messages.map(normalizeMessage).filter(Boolean)
+      summary: typeof data.summary === "string" ? data.summary : "",
+      messages: Array.isArray(data.messages)
+        ? data.messages.map(normalizeMessage).filter(Boolean)
         : [],
     },
   };
@@ -58,35 +57,54 @@ function normalizeLinkedEntity(linkedEntity) {
     type: typeof linkedEntity.type === "string" && linkedEntity.type ? linkedEntity.type : "link",
     label: typeof linkedEntity.label === "string" ? linkedEntity.label : "",
     entity,
-    data: linkedEntity.data && typeof linkedEntity.data === "object" ? { ...linkedEntity.data } : {},
   };
 }
 
 function normalizeGraphContext(context) {
   if (!context || typeof context !== "object") {
-    return null;
+    return {
+      ok: false,
+      error: "context is required",
+    };
+  }
+
+  if (context.version !== GRAPH_CONTEXT_VERSION) {
+    return {
+      ok: false,
+      error: `context version must be ${GRAPH_CONTEXT_VERSION}`,
+    };
   }
 
   const focusEntity = normalizeEntitySnapshot(context.focusEntity);
+  if (!focusEntity) {
+    return {
+      ok: false,
+      error: "focusEntity is invalid",
+    };
+  }
+
   const linkedEntities = Array.isArray(context?.linkedEntities)
     ? context.linkedEntities.map(normalizeLinkedEntity)
     : [];
 
-  if (!focusEntity) {
-    return null;
-  }
-
   if (linkedEntities.some((item) => !item)) {
-    return null;
+    return {
+      ok: false,
+      error: "linkedEntities contain invalid snapshots",
+    };
   }
 
   return {
-    version: 4,
-    focusEntity,
-    linkedEntities,
+    ok: true,
+    context: {
+      version: GRAPH_CONTEXT_VERSION,
+      focusEntity,
+      linkedEntities,
+    },
   };
 }
 
 module.exports = {
+  GRAPH_CONTEXT_VERSION,
   normalizeGraphContext,
 };

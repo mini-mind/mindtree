@@ -20,8 +20,23 @@ export function normalizeStoredConfig(agentDefinitions, config = {}) {
     baseUrl: normalizeTextValue(config.baseUrl),
     apiKey: normalizeTextValue(config.apiKey),
     model: normalizeTextValue(config.model),
+    optionValues: {},
     agents: createEmptyAgentOverrides(agentDefinitions),
   };
+
+  Object.entries(config).forEach(([key, value]) => {
+    if (["baseUrl", "apiKey", "model", "agents"].includes(key)) {
+      return;
+    }
+
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      normalized.optionValues[key] = value;
+    }
+  });
 
   agentDefinitions.forEach((agent) => {
     const existing = config.agents?.[agent.key];
@@ -37,14 +52,23 @@ export function normalizeStoredConfig(agentDefinitions, config = {}) {
   return normalized;
 }
 
-export function buildInitialConfig(agentDefinitions, baseConfig, storedConfig, capabilities) {
+function getStoredModelOptionValues(capabilities, model, optionValues = {}) {
+  const capability = getModelCapabilities(capabilities, model);
+  return capability.options.reduce((accumulator, option) => {
+    if (option.key in optionValues) {
+      accumulator[option.key] = normalizeOptionValue(option, optionValues[option.key]);
+    }
+    return accumulator;
+  }, {});
+}
+
+export function buildInitialConfig(agentDefinitions, defaultConfig, storedConfig, capabilities) {
   const normalizedStored = normalizeStoredConfig(agentDefinitions, storedConfig);
-  const resolvedBaseUrl = normalizedStored.baseUrl || baseConfig.baseUrl;
-  const resolvedApiKey = normalizedStored.apiKey || baseConfig.apiKey;
-  const resolvedModel = normalizedStored.model || baseConfig.model;
+  const resolvedBaseUrl = normalizedStored.baseUrl || defaultConfig.baseUrl;
+  const resolvedApiKey = normalizedStored.apiKey || defaultConfig.apiKey;
+  const resolvedModel = normalizedStored.model || defaultConfig.model;
   return {
-    ...baseConfig,
-    ...getModelOptionDefaults(capabilities, baseConfig.model),
+    ...defaultConfig,
     baseUrl: resolvedBaseUrl,
     apiKey: resolvedApiKey,
     model: resolvedModel,
@@ -53,6 +77,7 @@ export function buildInitialConfig(agentDefinitions, baseConfig, storedConfig, c
       ...(normalizedStored.agents || {}),
     },
     ...getModelOptionDefaults(capabilities, resolvedModel),
+    ...getStoredModelOptionValues(capabilities, resolvedModel, normalizedStored.optionValues),
   };
 }
 
@@ -76,7 +101,7 @@ function createAgentField(id, labelText, placeholder) {
 export function createLlmConfigController({
   agentDefinitions,
   elements,
-  serverConfig,
+  getDefaultConfig,
   getConfig,
   setConfig,
   getKnownModels,
@@ -184,8 +209,9 @@ export function createLlmConfigController({
 
   function renderModelSelect() {
     const config = getConfig();
-    const options = getKnownModels().length ? getKnownModels() : [serverConfig.model];
-    const currentModel = config.model || serverConfig.model;
+    const defaultConfig = getDefaultConfig();
+    const options = getKnownModels().length ? getKnownModels() : [defaultConfig.model];
+    const currentModel = config.model || defaultConfig.model;
     const isKnownModel = options.includes(currentModel);
 
     elements.cfgModelSelect.innerHTML = "";
@@ -260,11 +286,12 @@ export function createLlmConfigController({
 
   function hydrateForm() {
     const config = getConfig();
+    const defaultConfig = getDefaultConfig();
     elements.cfgBaseUrl.value = config.baseUrl;
     elements.cfgApiKey.value = config.apiKey;
     elements.cfgModel.value = config.model;
     renderModelSelect();
-    renderModelOptions(config.model || serverConfig.model);
+    renderModelOptions(config.model || defaultConfig.model);
 
     agentDefinitions.forEach((agent) => {
       const override = config.agents?.[agent.key] || {};
@@ -337,6 +364,9 @@ export function createLlmConfigController({
     syncTabs,
     updateConfig(nextConfig) {
       setConfig(nextConfig);
+    },
+    getDefaultModel() {
+      return getDefaultConfig().model;
     },
   };
 }

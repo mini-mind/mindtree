@@ -1,40 +1,26 @@
 import {
-  clearStoredGraph,
-  getLocalFallbackConfig,
-  loadGraph,
   loadStoredConfig,
-  saveConfig,
-  saveGraph,
 } from "./config-store.js";
-import {
-  addGraphNode,
-  createInitialGraphDocument,
-  createNode,
-  deleteNodeFromGraph,
-  getMaxGraphId,
-  getNodeById,
-  getNodePosition,
-  normalizeGraph,
-} from "./graph-model.js";
-import { GraphValidationError } from "./graph-validation.js";
+import { createBootstrapLlmConfigFallback } from "./bootstrap-config.js";
+import { DEFAULT_LLM_BOOTSTRAP } from "./llm-provider-defaults.js";
 import { createGraphCanvas, GRAPH_CANVAS_THEME } from "./graph-canvas.js";
+import { bindAppEvents, bindDialogBackdropClose } from "./app-bindings.js";
+import {
+  fetchServerDefaultConfig,
+  restoreGraphFromStorage,
+} from "./app-bootstrap.js";
 import { buildInitialConfig, createLlmConfigController } from "./llm-config-ui.js";
-import { BASE_NODE_BLUEPRINTS } from "./ecs-defaults.js";
-import { getEcsUiComponent } from "./ecs-ui-registry.js";
-import {
-  buildEntityContext,
-  dispatchDialogSubmit,
-  getEntityDialogConfig,
-  getEntityDialogTitle,
-  getEntityMessageLabel,
-} from "./ecs-plugins.js";
+import { createContextMenuController } from "./app-context-menus.js";
+import { createCreateNodeController } from "./app-create-node.js";
+import { createAppRuntime } from "./app-runtime.js";
+import { createSelectionController } from "./app-selection.js";
+import { createTestApi } from "./app-test-api.js";
 import "./ecs-plugins.js";
-import {
-  createWorld,
-  emitEntityEvent,
-  initializeEntity,
-  stepWorld,
-} from "./ecs-world.js";
+import { getEntityCanvasSummary } from "./ecs-node-ui.js";
+import "./ecs-node-ui.js";
+import { createNodeDialogController } from "./node-dialog-controller.js";
+import { createPluginBackpackController } from "./plugin-backpack-ui.js";
+import { emitEntityEvent, stepWorld } from "./ecs-world.js";
 
 const AGENT_DEFINITIONS = [{ key: "assistant", label: "Assistant" }];
 const isTestMode = new URLSearchParams(window.location.search).has("test");
@@ -70,125 +56,53 @@ const elements = {
   nodeDialogDirection: document.getElementById("node-dialog-direction"),
   nodeDialogSubmit: document.getElementById("node-dialog-submit"),
   nodeDialogStatus: document.getElementById("node-dialog-status"),
+  openPluginBackpack: document.getElementById("open-plugin-backpack"),
   createNodeDialog: document.getElementById("create-node-dialog"),
-  createNodeTypeList: document.getElementById("create-node-type-list"),
-  createNodeDescription: document.getElementById("create-node-description"),
   confirmCreateNode: document.getElementById("confirm-create-node"),
+  pluginBackpackDialog: document.getElementById("plugin-backpack-dialog"),
+  pluginBackpackList: document.getElementById("plugin-backpack-list"),
+  pluginBackpackDescription: document.getElementById("plugin-backpack-description"),
+  pluginInstalledTree: document.getElementById("plugin-installed-tree"),
+  pluginBackpackTarget: document.getElementById("plugin-backpack-target"),
+  pluginConfigPanel: document.getElementById("plugin-config-panel"),
+  closePluginBackpackAction: document.getElementById("close-plugin-backpack-action"),
+  removeSelectedPlugin: document.getElementById("remove-selected-plugin"),
+  attachSelectedPlugin: document.getElementById("attach-selected-plugin"),
 };
 
-const serverConfig = getLocalFallbackConfig();
-let modelCapabilities = {};
-let graph = createInitialGraphDocument();
-let llmConfig = buildInitialConfig(
-  AGENT_DEFINITIONS,
-  serverConfig,
-  loadStoredConfig(),
-  modelCapabilities
+elements.cfgBaseUrl.placeholder = DEFAULT_LLM_BOOTSTRAP.baseUrl;
+elements.cfgModel.placeholder = DEFAULT_LLM_BOOTSTRAP.model;
+
+const defaultConfig = createBootstrapLlmConfigFallback();
+const restoredGraph = restoreGraphFromStorage({
+  onCorruptedGraph: (error) => {
+    setStatus(`已重置损坏图数据：${error.message}`, true);
+  },
+});
+const runtime = createAppRuntime({
+  initialGraph: restoredGraph,
+  initialDefaultConfig: defaultConfig,
+  initialConfig: buildInitialConfig(
+    AGENT_DEFINITIONS,
+    defaultConfig,
+    loadStoredConfig(),
+    {}
+  ),
+});
+const selection = createSelectionController(
+  runtime.getGraph().nodes[0]?.id == null ? [] : [runtime.getGraph().nodes[0].id]
 );
-let nodeId = Math.max(2, getMaxGraphId(graph) + 1);
-let world = null;
-const interactionState = {
-  selectedIds: graph.nodes[0]?.id == null ? [] : [graph.nodes[0].id],
-  contextMenuNodeId: null,
-  canvasContextMenuPosition: null,
-  createNodeIntent: null,
-  selectedCreateNodeType: "note",
-};
 
-function normalizeSelectedIds(ids = []) {
-  return [...new Set(ids.filter((id) => Number.isFinite(id)))];
+function getGraph() {
+  return runtime.getGraph();
 }
 
-function setSelection(nextSelectedIds = []) {
-  interactionState.selectedIds = normalizeSelectedIds(nextSelectedIds);
+function getSelectedNode() {
+  return runtime.getNodeById(selection.get().selectedId);
 }
 
-function getSelection() {
-  return {
-    selectedId: interactionState.selectedIds[0] ?? null,
-    selectedIds: [...interactionState.selectedIds],
-  };
-}
-
-function selectSingleNode(id) {
-  setSelection(id === null ? [] : [id]);
-}
-
-function clearSelection() {
-  setSelection([]);
-}
-
-function rebuildWorld() {
-  world = createWorld(graph, {
-    requestAgentRun: (node, promptText) => requestAgentRun(node, promptText),
-    getConfig: () => llmConfig,
-    step: () => stepWorld(world),
-  });
-}
-
-function persistGraph() {
-  saveGraph(graph);
-}
-
-function replaceGraph(nextGraph) {
-  graph = nextGraph;
-  rebuildWorld();
-  persistGraph();
-  syncSelection();
-}
-
-function clampToViewport(element, position, margin = 12) {
-  const previousHidden = element.hidden;
-  const previousVisibility = element.style.visibility;
-
-  element.hidden = false;
-  element.style.visibility = "hidden";
-  element.style.left = "0px";
-  element.style.top = "0px";
-
-  const rect = element.getBoundingClientRect();
-  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
-  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
-
-  element.style.left = `${Math.min(Math.max(position.x, margin), maxLeft)}px`;
-  element.style.top = `${Math.min(Math.max(position.y, margin), maxTop)}px`;
-  element.style.visibility = previousVisibility;
-  element.hidden = previousHidden;
-}
-
-function buildCreateNodeDescription(blueprint) {
-  if (!blueprint) {
-    return "选择节点类型后创建。";
-  }
-
-  return `将在当前画布位置创建一个“${blueprint.creationLabel || blueprint.label}”。`;
-}
-
-function renderCreateNodeDialogOptions() {
-  elements.createNodeTypeList.innerHTML = "";
-
-  BASE_NODE_BLUEPRINTS.forEach((blueprint) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `option-card${
-      interactionState.selectedCreateNodeType === blueprint.key ? " is-active" : ""
-    }`;
-    button.dataset.nodeType = blueprint.key;
-    button.innerHTML = `
-      <span class="option-card-title">${blueprint.creationLabel || blueprint.label}</span>
-      <span class="option-card-desc">${blueprint.description || ""}</span>
-    `;
-    button.addEventListener("click", () => {
-      interactionState.selectedCreateNodeType = blueprint.key;
-      renderCreateNodeDialogOptions();
-    });
-    elements.createNodeTypeList.appendChild(button);
-  });
-
-  const selectedBlueprint = BASE_NODE_BLUEPRINTS.find(
-    (item) => item.key === interactionState.selectedCreateNodeType
-  );
-  elements.createNodeDescription.textContent = buildCreateNodeDescription(selectedBlueprint);
+function getCurrentModelCapabilities() {
+  return runtime.getModelCapabilities();
 }
 
 function getNodeOffsetAtScreenPosition(position) {
@@ -204,424 +118,218 @@ function setStatus(message, isError = false) {
   elements.status.style.color = isError ? "var(--danger)" : "var(--muted)";
 }
 
-function setNodeDialogStatus(message, isError = false) {
-  elements.nodeDialogStatus.textContent = message;
-  elements.nodeDialogStatus.style.color = isError ? "var(--danger)" : "var(--muted)";
-}
-
-function renderEntityDialogBody(node) {
-  elements.nodeDialogMessages.innerHTML = "";
-  elements.nodeDialogPanel.innerHTML = "";
-  const config = getEntityDialogConfig(node);
-  const body = Array.isArray(config.body) ? config.body : [];
-
-  body.forEach((component) => {
-    const renderer = getEcsUiComponent(component);
-    if (!renderer) {
-      return;
-    }
-
-    renderer({
-      entity: node,
-      elements,
-      panel: elements.nodeDialogPanel,
-      helpers: {
-        getMessageLabel: getEntityMessageLabel,
-      },
-    });
-  });
-
-  elements.nodeDialogPanel.hidden = elements.nodeDialogPanel.innerHTML.trim() === "";
-  elements.nodeDialogDirection.placeholder = config.composer?.placeholder || "输入内容";
-  elements.nodeDialogSubmit.textContent = config.composer?.actionLabel || "发送";
-}
-
 function syncSelection() {
-  const { selectedId, selectedIds } = getSelection();
-  graphCanvas.render(graph, selectedId, selectedIds);
+  const { selectedId, selectedIds } = selection.get();
+  graphCanvas.render(getGraph(), selectedId, selectedIds);
 }
 
-async function openNodeDialog() {
-  const { selectedId } = getSelection();
-  const node = getNodeById(graph, selectedId);
-  if (!node) {
-    return;
-  }
-
-  await initializeEntity(world, node);
-  await stepWorld(world);
-  elements.nodeDialogSummary.textContent = getEntityDialogTitle(node);
-  elements.nodeDialogDirection.value = "";
-  renderEntityDialogBody(node);
-  const dialogRuntime = node.runtime.components["dialog-ui"] || {};
-  setNodeDialogStatus(dialogRuntime.statusMessage || "");
-  elements.nodeDialog.showModal();
-}
-
-async function resetNodeDialog(node) {
-  await stepWorld(world);
-  elements.nodeDialogSummary.textContent = getEntityDialogTitle(node);
-  elements.nodeDialogDirection.value = "";
-  renderEntityDialogBody(node);
-  const dialogRuntime = node.runtime.components["dialog-ui"] || {};
-  setNodeDialogStatus(dialogRuntime.statusMessage || "");
-}
-
-function appendNode(offsetX = 0, offsetY = 0, type = "note") {
-  const node = createNode(nodeId++, offsetX, offsetY, type);
-  addGraphNode(graph, node);
-  rebuildWorld();
-  selectSingleNode(node.id);
-  persistGraph();
+function appendNode(offsetX = 0, offsetY = 0) {
+  const node = runtime.appendNode(offsetX, offsetY);
+  selection.selectSingle(node.id);
   syncSelection();
 }
 
-function openCreateNodeDialog(intent) {
-  interactionState.createNodeIntent = intent;
-  interactionState.selectedCreateNodeType = "note";
-  renderCreateNodeDialogOptions();
-  elements.createNodeDialog.showModal();
+function openConfig() {
+  llmConfigUi.hydrateForm();
+  elements.configDialog.showModal();
 }
 
-function confirmCreateNodeFromDialog() {
-  const intent = interactionState.createNodeIntent;
-  if (!intent) {
+function saveConfigFromForm() {
+  llmConfigUi.updateConfig(llmConfigUi.collectForm());
+  runtime.saveConfig();
+  llmConfigUi.hydrateForm();
+  elements.configDialog.close();
+  setStatus("LLM 配置已保存到本地。");
+}
+
+async function initializeServerDefaults() {
+  const serverDefaults = await fetchServerDefaultConfig();
+  if (!serverDefaults) {
+    runtime.setModelCapabilities({});
     return;
   }
 
-  appendNode(intent.offset.x, intent.offset.y, interactionState.selectedCreateNodeType);
-  elements.createNodeDialog.close();
-  setStatus("已新增节点。");
-}
+  const nextModelCapabilities = serverDefaults.modelCapabilities || {};
+  const nextDefaultConfig = { ...serverDefaults };
+  delete nextDefaultConfig.modelCapabilities;
 
-async function loadServerDefaults() {
-  try {
-    const response = await fetch("/api/default-config");
-    if (!response.ok) {
-      return;
-    }
-
-    const serverDefaults = await response.json();
-    modelCapabilities = serverDefaults.modelCapabilities || {};
-    delete serverDefaults.modelCapabilities;
-    Object.assign(serverConfig, serverDefaults);
-    llmConfig = buildInitialConfig(
+  runtime.setModelCapabilities(nextModelCapabilities);
+  runtime.setDefaultConfig(nextDefaultConfig);
+  runtime.setConfig(
+    buildInitialConfig(
       AGENT_DEFINITIONS,
-      serverConfig,
+      runtime.getDefaultConfig(),
       loadStoredConfig(),
-      modelCapabilities
-    );
-    llmConfigUi.hydrateForm();
-  } catch {
-    modelCapabilities = {};
-  }
+      nextModelCapabilities
+    )
+  );
+  llmConfigUi.hydrateForm();
 }
 
-function restoreGraphFromStorage() {
-  try {
-    return normalizeGraph(loadGraph() || createInitialGraphDocument());
-  } catch (error) {
-    if (!(error instanceof GraphValidationError)) {
-      throw error;
-    }
-
-    clearStoredGraph();
-    setStatus(`已重置损坏图数据：${error.message}`, true);
-    return createInitialGraphDocument();
-  }
-}
-
-async function requestAgentRun(node, promptText) {
-  const context = buildEntityContext(graph, node);
-  const response = await fetch("/api/agent-run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      agentKey: node.data?.agentKey || "assistant",
-      context,
-      prompt: promptText,
-      config: llmConfig,
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "请求失败");
-  }
-
-  return data;
-}
-
-async function submitNodeDialog() {
-  const { selectedId } = getSelection();
-  const node = getNodeById(graph, selectedId);
-  if (!node) {
-    return;
-  }
-
-  elements.nodeDialogSubmit.disabled = true;
-  const result = await dispatchDialogSubmit(world, node, elements.nodeDialogDirection.value);
-  if (result.requiresConfig) {
-    llmConfigUi.setActiveTab("base");
-    openConfig();
-  }
-  await resetNodeDialog(node);
-  persistGraph();
+async function refreshNodeAfterMutation(node) {
+  await runtime.refreshNodeAfterMutation(node, (currentNode) => nodeDialogController.refresh(currentNode));
   syncSelection();
-  setNodeDialogStatus(result.statusMessage || "", Boolean(result.isError));
-  if (result.statusMessage) {
-    setStatus(result.statusMessage, Boolean(result.isError));
-  }
-  elements.nodeDialogSubmit.disabled = false;
-}
-
-function bindDialogBackdropClose(dialog) {
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog) {
-      dialog.close();
-    }
-  });
 }
 
 function deleteSelectedNode(targetId) {
-  const result = deleteNodeFromGraph(graph, targetId);
+  const result = runtime.deleteNode(targetId);
   if (!result.deleted) {
     return;
   }
 
-  setSelection(result.graph.nodes[0] ? [result.graph.nodes[0].id] : []);
-  replaceGraph(result.graph);
-  closeNodeContextMenu();
+  selection.set(getGraph().nodes[0] ? [getGraph().nodes[0].id] : []);
+  contextMenus.closeNode();
   setStatus("节点已删除。");
+  syncSelection();
 }
 
 function deleteSelectedNodes(targetIds) {
-  const ids = [...new Set(targetIds)].sort((left, right) => right - left);
-  let nextGraph = graph;
-  let deletedCount = 0;
-  ids.forEach((id) => {
-    const result = deleteNodeFromGraph(nextGraph, id);
-    if (result.deleted) {
-      nextGraph = result.graph;
-      deletedCount += 1;
-    }
-  });
+  const result = runtime.deleteNodes(targetIds);
 
-  if (!deletedCount) {
+  if (!result.deletedCount) {
     return;
   }
 
-  clearSelection();
-  replaceGraph(nextGraph);
-  closeAllContextMenus();
-  setStatus(deletedCount === 1 ? "节点已删除。" : `已删除 ${deletedCount} 个节点。`);
-}
-
-function openNodeContextMenu(nodeId, position) {
-  if (!getNodeById(graph, nodeId)) {
-    return;
-  }
-
-  closeCanvasContextMenu();
-  interactionState.contextMenuNodeId = nodeId;
-  selectSingleNode(nodeId);
+  selection.clear();
+  contextMenus.closeAll();
+  setStatus(result.deletedCount === 1 ? "节点已删除。" : `已删除 ${result.deletedCount} 个节点。`);
   syncSelection();
-  elements.nodeContextMenu.hidden = false;
-  clampToViewport(elements.nodeContextMenu, position);
 }
 
-function closeNodeContextMenu() {
-  interactionState.contextMenuNodeId = null;
-  elements.nodeContextMenu.hidden = true;
-}
-
-function openCanvasContextMenu(position) {
-  closeNodeContextMenu();
-  const { selectedIds } = getSelection();
-  interactionState.canvasContextMenuPosition = position;
-  elements.contextDeleteSelectedNodes.hidden = selectedIds.length < 2;
-  elements.canvasContextMenu.hidden = false;
-  clampToViewport(elements.canvasContextMenu, position);
-}
-
-function closeCanvasContextMenu() {
-  interactionState.canvasContextMenuPosition = null;
-  elements.canvasContextMenu.hidden = true;
-}
-
-function closeAllContextMenus() {
-  closeNodeContextMenu();
-  closeCanvasContextMenu();
-}
-
-elements.cfgModelSelect.addEventListener("change", () => {
-  const isCustom = elements.cfgModelSelect.value === "__custom__";
-  elements.cfgModelCustomField.style.display = isCustom ? "flex" : "none";
-  llmConfigUi.renderModelOptions(
-    isCustom ? elements.cfgModel.value.trim() || serverConfig.model : elements.cfgModelSelect.value
-  );
-});
-
-elements.cfgModel.addEventListener("input", () => {
-  if (elements.cfgModelSelect.value === "__custom__") {
-    llmConfigUi.renderModelOptions(elements.cfgModel.value.trim() || serverConfig.model);
-  }
-});
-
-elements.configTabTriggerBase.addEventListener("click", () => {
-  llmConfigUi.setActiveTab("base");
-});
-
-elements.floatingConfig.addEventListener("click", () => {
-  llmConfigUi.hydrateForm();
-  elements.configDialog.showModal();
-});
-elements.floatingHelp.addEventListener("click", () => {
-  elements.helpDialog.showModal();
-});
-
-elements.contextEditNode.addEventListener("click", () => {
-  const nodeId = interactionState.contextMenuNodeId;
-  if (nodeId === null) {
-    return;
-  }
-  selectSingleNode(nodeId);
-  closeNodeContextMenu();
-  openNodeDialog();
-});
-
-elements.contextDeleteNode.addEventListener("click", () => {
-  const nodeId = interactionState.contextMenuNodeId;
-  if (nodeId === null) {
-    return;
-  }
-  deleteSelectedNode(nodeId);
-});
-
-elements.contextAddNode.addEventListener("click", () => {
-  const offset = getNodeOffsetAtScreenPosition(interactionState.canvasContextMenuPosition || { x: 0, y: 0 });
-  closeCanvasContextMenu();
-  openCreateNodeDialog({ offset });
-});
-
-elements.contextDeleteSelectedNodes.addEventListener("click", () => {
-  deleteSelectedNodes(getSelection().selectedIds);
-});
-
-elements.saveConfig.addEventListener("click", (event) => {
-  event.preventDefault();
-  llmConfigUi.updateConfig(llmConfigUi.collectForm());
-  saveConfig(llmConfig);
-  llmConfigUi.hydrateForm();
-  elements.configDialog.close();
-  setStatus("LLM 配置已保存到本地。");
-});
-
-elements.nodeDialogSubmit.addEventListener("click", () => {
-  submitNodeDialog();
-});
-
-elements.confirmCreateNode.addEventListener("click", () => {
-  confirmCreateNodeFromDialog();
-});
-
-window.addEventListener("resize", () => {
-  closeAllContextMenus();
-  graphCanvas.resize();
-});
-
-window.addEventListener("pointerdown", (event) => {
-  if (!elements.nodeContextMenu.hidden && !elements.nodeContextMenu.contains(event.target)) {
-    closeNodeContextMenu();
-  }
-
-  if (!elements.canvasContextMenu.hidden && !elements.canvasContextMenu.contains(event.target)) {
-    closeCanvasContextMenu();
-  }
+const pluginBackpack = createPluginBackpackController({
+  elements,
+  getSelectedNode: () => getSelectedNode(),
+  onNodeMutated: refreshNodeAfterMutation,
+  setStatus,
 });
 
 const graphCanvas = createGraphCanvas(canvas, {
+  getNodeSummary: (node) => getEntityCanvasSummary(node),
   onNodeSelect: (id) => {
-    closeAllContextMenus();
-    selectSingleNode(id);
+    contextMenus.closeAll();
+    selection.selectSingle(id);
     syncSelection();
   },
   onNodesSelect: (ids) => {
-    closeAllContextMenus();
-    setSelection(ids);
+    contextMenus.closeAll();
+    selection.set(ids);
     syncSelection();
   },
   onNodeOpen: (id) => {
-    closeAllContextMenus();
-    selectSingleNode(id);
+    contextMenus.closeAll();
+    selection.selectSingle(id);
     syncSelection();
-    openNodeDialog();
+    nodeDialogController.open();
   },
   onBackgroundSelect: () => {
-    closeAllContextMenus();
-    clearSelection();
+    contextMenus.closeAll();
+    selection.clear();
     syncSelection();
   },
   onNodeMove: (id, deltaX, deltaY) => {
-    const node = getNodeById(graph, id);
-    if (!node) {
+    if (!runtime.moveNode(id, deltaX, deltaY)) {
       return;
     }
-    const position = getNodePosition(node);
-    node.data.x = position.x + deltaX;
-    node.data.y = position.y + deltaY;
-    persistGraph();
     syncSelection();
   },
   onNodeContextMenu: (id, position) => {
-    const { selectedIds } = getSelection();
+    const { selectedIds } = selection.get();
     if (selectedIds.length > 1 && selectedIds.includes(id)) {
-      openCanvasContextMenu(position);
+      contextMenus.openCanvas(position);
       return;
     }
-    openNodeContextMenu(id, position);
+    contextMenus.openNode(id, position);
   },
   onBackgroundContextMenu: (position) => {
-    openCanvasContextMenu(position);
+    contextMenus.openCanvas(position);
   },
 });
 
 const llmConfigUi = createLlmConfigController({
   agentDefinitions: AGENT_DEFINITIONS,
   elements,
-  serverConfig,
-  getConfig: () => llmConfig,
+  getDefaultConfig: () => runtime.getDefaultConfig(),
+  getConfig: () => runtime.getConfig(),
   setConfig: (nextConfig) => {
-    llmConfig = nextConfig;
+    runtime.setConfig(nextConfig);
   },
-  getKnownModels: () => Object.keys(modelCapabilities),
-  getModelCapabilitiesMap: () => modelCapabilities,
+  getKnownModels: () => Object.keys(getCurrentModelCapabilities()),
+  getModelCapabilitiesMap: () => getCurrentModelCapabilities(),
+});
+
+const contextMenus = createContextMenuController({
+  elements,
+  getSelection: () => selection.get(),
+  selectSingleNode: (id) => selection.selectSingle(id),
+  syncSelection,
+  hasNode: (id) => Boolean(runtime.getNodeById(id)),
+});
+
+const nodeDialogController = createNodeDialogController({
+  elements,
+  getSelectedNode: () => getSelectedNode(),
+  getWorld: () => runtime.getWorld(),
+  setStatus,
+  persistGraph: () => runtime.persistGraph(),
+  syncSelection,
+  openConfig: () => {
+    llmConfigUi.setActiveTab("base");
+    openConfig();
+  },
+});
+
+const createNodeController = createCreateNodeController({
+  dialog: elements.createNodeDialog,
+  onCreate: (intent) => {
+    appendNode(intent.offset.x, intent.offset.y);
+    setStatus("已新增节点。");
+  },
+});
+
+bindAppEvents({
+  elements,
+  llmConfigUi,
+  contextMenus,
+  selection,
+  graphCanvas,
+  nodeDialogController,
+  pluginBackpack,
+  createNodeController,
+  getNodeOffsetAtScreenPosition,
+  openConfig,
+  openHelp: () => elements.helpDialog.showModal(),
+  deleteSelectedNode,
+  deleteSelectedNodes,
+});
+
+elements.saveConfig.addEventListener("click", (event) => {
+  event.preventDefault();
+  saveConfigFromForm();
 });
 
 bindDialogBackdropClose(elements.helpDialog);
 bindDialogBackdropClose(elements.configDialog);
 bindDialogBackdropClose(elements.nodeDialog);
 bindDialogBackdropClose(elements.createNodeDialog);
+bindDialogBackdropClose(elements.pluginBackpackDialog);
 llmConfigUi.renderAgentPanels();
-graph = restoreGraphFromStorage();
-rebuildWorld();
-nodeId = Math.max(2, getMaxGraphId(graph) + 1);
-setSelection(graph.nodes[0] ? [graph.nodes[0].id] : []);
+selection.set(getGraph().nodes[0] ? [getGraph().nodes[0].id] : []);
 syncSelection();
 graphCanvas.resize();
-loadServerDefaults();
+initializeServerDefaults();
 
 if (isTestMode) {
-  window.__mindzooTestApi = {
-    getNodeScreenBox(id) {
-      return graphCanvas.getNodeScreenBox(id);
-    },
-    async emitNodeEvent(targetNodeId, event) {
-      const delivered = emitEntityEvent(world, targetNodeId, event);
+  window.__mindzooTestApi = createTestApi({
+    graphCanvas,
+    enqueueNodeMessage: async (targetNodeId, payload) => {
+      const delivered = emitEntityEvent(runtime.getWorld(), targetNodeId, {
+        type: "message.enqueue",
+        payload,
+      });
       if (delivered) {
-        await stepWorld(world);
+        await stepWorld(runtime.getWorld());
       }
       return { delivered };
     },
-  };
+  });
 }

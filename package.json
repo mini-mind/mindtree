@@ -4,7 +4,9 @@
   "description": "Directed graph workspace with extensible node agents",
   "main": "server.js",
   "scripts": {
+    "build:defaults": "node scripts/generate-public-llm-defaults.js",
     "dev": "node --watch server.js",
+    "pretest": "npm run build:defaults",
     "start": "node server.js",
     "test": "node --test test/server.test.js test/ui.test.js",
     "test:live": "node --test test/siliconflow.smoke.test.js"
