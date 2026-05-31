@@ -19,8 +19,8 @@ import "./ecs-plugins.js";
 import { getEntityCanvasSummary } from "./ecs-node-ui.js";
 import "./ecs-node-ui.js";
 import { createNodeDialogController } from "./node-dialog-controller.js";
-import { createPluginBackpackController } from "./plugin-backpack-ui.js";
 import { emitEntityEvent, stepWorld } from "./ecs-world.js";
+import { getNodePreset, listNodePresets } from "./node-presets.js";
 
 const AGENT_DEFINITIONS = [{ key: "assistant", label: "Assistant" }];
 const isTestMode = new URLSearchParams(window.location.search).has("test");
@@ -56,18 +56,9 @@ const elements = {
   nodeDialogDirection: document.getElementById("node-dialog-direction"),
   nodeDialogSubmit: document.getElementById("node-dialog-submit"),
   nodeDialogStatus: document.getElementById("node-dialog-status"),
-  openPluginBackpack: document.getElementById("open-plugin-backpack"),
   createNodeDialog: document.getElementById("create-node-dialog"),
+  createNodeOptions: document.getElementById("create-node-options"),
   confirmCreateNode: document.getElementById("confirm-create-node"),
-  pluginBackpackDialog: document.getElementById("plugin-backpack-dialog"),
-  pluginBackpackList: document.getElementById("plugin-backpack-list"),
-  pluginBackpackDescription: document.getElementById("plugin-backpack-description"),
-  pluginInstalledTree: document.getElementById("plugin-installed-tree"),
-  pluginBackpackTarget: document.getElementById("plugin-backpack-target"),
-  pluginConfigPanel: document.getElementById("plugin-config-panel"),
-  closePluginBackpackAction: document.getElementById("close-plugin-backpack-action"),
-  removeSelectedPlugin: document.getElementById("remove-selected-plugin"),
-  attachSelectedPlugin: document.getElementById("attach-selected-plugin"),
 };
 
 elements.cfgBaseUrl.placeholder = DEFAULT_LLM_BOOTSTRAP.baseUrl;
@@ -121,12 +112,6 @@ function setStatus(message, isError = false) {
 function syncSelection() {
   const { selectedId, selectedIds } = selection.get();
   graphCanvas.render(getGraph(), selectedId, selectedIds);
-}
-
-function appendNode(offsetX = 0, offsetY = 0) {
-  const node = runtime.appendNode(offsetX, offsetY);
-  selection.selectSingle(node.id);
-  syncSelection();
 }
 
 function openConfig() {
@@ -196,12 +181,32 @@ function deleteSelectedNodes(targetIds) {
   syncSelection();
 }
 
-const pluginBackpack = createPluginBackpackController({
-  elements,
-  getSelectedNode: () => getSelectedNode(),
-  onNodeMutated: refreshNodeAfterMutation,
-  setStatus,
-});
+function connectNodes(sourceId, targetId) {
+  const source = runtime.getNodeById(sourceId);
+  const target = runtime.getNodeById(targetId);
+  if (!source || !target || sourceId === targetId) {
+    return false;
+  }
+
+  const sourceType = source.data?.nodeType || "";
+  const targetType = target.data?.nodeType || "";
+  const linkType = sourceType === "agent" && targetType === "task-board"
+    ? "agent/task_board"
+    : "reference";
+  const label = linkType === "agent/task_board" ? "执行任务" : "";
+  const connected = runtime.connectNodes(sourceId, targetId, {
+    type: linkType,
+    label,
+    config: {},
+  });
+  if (!connected) {
+    return false;
+  }
+
+  syncSelection();
+  setStatus(`已建立引用：#${sourceId} -> #${targetId}`);
+  return true;
+}
 
 const graphCanvas = createGraphCanvas(canvas, {
   getNodeSummary: (node) => getEntityCanvasSummary(node),
@@ -243,6 +248,18 @@ const graphCanvas = createGraphCanvas(canvas, {
   onBackgroundContextMenu: (position) => {
     contextMenus.openCanvas(position);
   },
+  getNodeLinks: (node) => Array.isArray(node?.data?.links) ? node.data.links : [],
+  onNodeReferenceCreate: (sourceId, targetId) => {
+    contextMenus.closeAll();
+    connectNodes(sourceId, targetId);
+  },
+  onNodeReferenceCreateToPoint: (sourceId, position) => {
+    contextMenus.closeAll();
+    createNodeController.open({
+      offset: getNodeOffsetAtScreenPosition(position),
+      sourceNodeId: sourceId,
+    });
+  },
 });
 
 const llmConfigUi = createLlmConfigController({
@@ -281,10 +298,40 @@ const nodeDialogController = createNodeDialogController({
 const createNodeController = createCreateNodeController({
   dialog: elements.createNodeDialog,
   onCreate: (intent) => {
-    appendNode(intent.offset.x, intent.offset.y);
-    setStatus("已新增节点。");
+    const presetKey = intent.presetKey || "build";
+    const node = runtime.appendPresetNode(presetKey, intent.offset.x, intent.offset.y);
+    selection.selectSingle(node.id);
+    syncSelection();
+    if (Number.isFinite(intent.sourceNodeId)) {
+      connectNodes(intent.sourceNodeId, node.id);
+      setStatus(`已新增${getNodePreset(presetKey).label}并建立引用。`);
+      return;
+    }
+    setStatus(`已新增${getNodePreset(presetKey).label}。`);
   },
 });
+
+function renderCreateNodeOptions() {
+  elements.createNodeOptions.innerHTML = "";
+  createNodeController.setPreset("build");
+  listNodePresets().forEach((preset) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `option-card${preset.key === "build" ? " is-active" : ""}`;
+    button.dataset.presetKey = preset.key;
+    button.innerHTML = `
+      <span class="option-card-title">${preset.label}</span>
+      <span class="option-card-desc">${preset.description}</span>
+    `;
+    button.addEventListener("click", () => {
+      createNodeController.setPreset(preset.key);
+      elements.createNodeOptions.querySelectorAll(".option-card").forEach((card) => {
+        card.classList.toggle("is-active", card.dataset.presetKey === preset.key);
+      });
+    });
+    elements.createNodeOptions.appendChild(button);
+  });
+}
 
 bindAppEvents({
   elements,
@@ -293,7 +340,6 @@ bindAppEvents({
   selection,
   graphCanvas,
   nodeDialogController,
-  pluginBackpack,
   createNodeController,
   getNodeOffsetAtScreenPosition,
   openConfig,
@@ -311,8 +357,8 @@ bindDialogBackdropClose(elements.helpDialog);
 bindDialogBackdropClose(elements.configDialog);
 bindDialogBackdropClose(elements.nodeDialog);
 bindDialogBackdropClose(elements.createNodeDialog);
-bindDialogBackdropClose(elements.pluginBackpackDialog);
 llmConfigUi.renderAgentPanels();
+renderCreateNodeOptions();
 selection.set(getGraph().nodes[0] ? [getGraph().nodes[0].id] : []);
 syncSelection();
 graphCanvas.resize();
@@ -331,5 +377,6 @@ if (isTestMode) {
       }
       return { delivered };
     },
+    connectNodes: async (sourceId, targetId) => ({ connected: connectNodes(sourceId, targetId) }),
   });
 }

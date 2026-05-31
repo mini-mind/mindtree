@@ -72,7 +72,7 @@
         <div class="help-content">
           <div class="help-item">
             <p class="section-title">画布交互</p>
-            <p>右键点击空白处打开画布菜单，右键拖动画布，滚轮缩放，左键拖动节点，左键在空白处拖拽可框选多个节点，点击空白处取消选中。</p>
+            <p>右键点击空白处打开画布菜单，右键拖动画布，右键从一个节点拖到另一个节点可建立有向引用，滚轮缩放，左键拖动节点，左键在空白处拖拽可框选多个节点，点击空白处取消选中。</p>
           </div>
           <div class="help-item">
             <p class="section-title">手机操作</p>
@@ -80,7 +80,7 @@
           </div>
           <div class="help-item">
             <p class="section-title">节点使用</p>
-            <p>单击节点选中，双击节点打开节点对话框。空节点创建后可在对话框中按需挂载插件，再获得消息、任务板、Agent 或其他能力。</p>
+            <p>单击节点选中，双击节点打开节点对话框。新增节点时可直接选择不同的 Agent 角色预设。</p>
           </div>
           <div class="help-item">
             <p class="section-title">节点记录</p>
@@ -167,24 +167,14 @@
             <p class="eyebrow">Node</p>
             <h2 id="node-dialog-summary" class="node-dialog-summary-text">未命名节点</h2>
           </div>
-          <div class="dialog-head-actions">
-            <button
-              id="open-plugin-backpack"
-              type="button"
-              class="ghost-button"
-              aria-label="打开插件背包"
-            >
-              插件背包
-            </button>
-            <button
-              id="close-node-dialog"
-              value="cancel"
-              class="ghost-button icon-button"
-              aria-label="关闭节点编辑"
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
+          <button
+            id="close-node-dialog"
+            value="cancel"
+            class="ghost-button icon-button"
+            aria-label="关闭节点编辑"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
 
         <div class="node-dialog-shell">
@@ -226,54 +216,13 @@
 
         <div class="create-node-layout">
           <section class="config-section">
-            <p class="section-title">创建空节点</p>
-            <p class="config-hint">新节点默认不预装插件。进入节点后可通过插件背包按需添加能力。</p>
+            <p class="section-title">Agent 角色</p>
+            <div id="create-node-options" class="option-list"></div>
           </section>
         </div>
 
         <div class="actions actions-end">
           <button id="confirm-create-node" type="button" class="primary-button">创建</button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog id="plugin-backpack-dialog" class="config-dialog">
-      <form method="dialog" class="config-card plugin-backpack-card">
-        <div class="config-head">
-          <div>
-            <p class="eyebrow">Plugins</p>
-            <h2>插件背包</h2>
-          </div>
-          <button
-            id="close-plugin-backpack-dialog"
-            value="cancel"
-            class="ghost-button icon-button"
-            aria-label="关闭插件背包"
-          >
-            <span aria-hidden="true">×</span>
-          </button>
-        </div>
-
-        <div class="plugin-backpack-shell">
-          <p id="plugin-backpack-description" class="config-hint">选择要挂载到当前节点上的插件。</p>
-          <div class="plugin-backpack-layout">
-            <section class="plugin-backpack-installed">
-              <p class="section-title">已安装插件树</p>
-              <div id="plugin-installed-tree" class="plugin-tree"></div>
-            </section>
-
-            <section class="plugin-backpack-browser">
-              <div id="plugin-backpack-target" class="plugin-backpack-target"></div>
-              <div id="plugin-config-panel" class="plugin-config-panel" hidden></div>
-              <div id="plugin-backpack-list" class="option-list"></div>
-            </section>
-          </div>
-        </div>
-
-        <div class="actions actions-end">
-          <button id="remove-selected-plugin" type="button" class="secondary-button">移除插件</button>
-          <button id="close-plugin-backpack-action" type="button" class="secondary-button">关闭</button>
-          <button id="attach-selected-plugin" type="button" class="primary-button">添加插件</button>
         </div>
       </form>
     </dialog>

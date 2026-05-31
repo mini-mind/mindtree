@@ -41,6 +41,9 @@ export function createGraphCanvas(
   canvas,
   {
     getNodeSummary,
+    getNodeLinks = () => [],
+    showMinimap = true,
+    initialViewMode = "default",
     onNodeSelect,
     onNodesSelect,
     onNodeOpen,
@@ -48,20 +51,46 @@ export function createGraphCanvas(
     onNodeMove,
     onNodeContextMenu,
     onBackgroundContextMenu,
+    onNodeReferenceCreate,
+    onNodeReferenceCreateToPoint,
   }
 ) {
   const ctx = canvas.getContext("2d");
-  const view = {
-    scale: 1,
-    offsetX: window.innerWidth * 0.42,
-    offsetY: 120,
-    draggingCanvas: false,
-    lastX: 0,
-    lastY: 0,
-  };
+  function createDefaultView() {
+    return {
+      scale: 1,
+      offsetX: getViewportSize().width * 0.42,
+      offsetY: 120,
+      draggingCanvas: false,
+      lastX: 0,
+      lastY: 0,
+    };
+  }
+
+  function getViewportSize() {
+    return {
+      width: canvas.clientWidth || window.innerWidth,
+      height: canvas.clientHeight || window.innerHeight,
+    };
+  }
+
+  function getCanvasRect() {
+    return canvas.getBoundingClientRect();
+  }
+
+  function toLocalPoint(clientX, clientY) {
+    const rect = getCanvasRect();
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+    };
+  }
+
+  const view = createDefaultView();
   const pointerState = {
     contextMenuCandidate: null,
     selectionBox: null,
+    referenceDraft: null,
   };
   const touchState = {
     primary: null,
@@ -79,6 +108,8 @@ export function createGraphCanvas(
   let lastTapId = null;
   let lastTapAt = 0;
   let draggingNodeId = null;
+  let hasInitializedView = false;
+  let animationFrame = 0;
 
   function beginSelectionBox(x, y) {
     pointerState.selectionBox = {
@@ -282,9 +313,35 @@ export function createGraphCanvas(
   }
 
   function centerViewportAtWorldPoint(worldX, worldY) {
-    view.offsetX = window.innerWidth / 2 - worldX * view.scale;
-    view.offsetY = window.innerHeight / 2 - worldY * view.scale;
+    const viewport = getViewportSize();
+    view.offsetX = viewport.width / 2 - worldX * view.scale;
+    view.offsetY = viewport.height / 2 - worldY * view.scale;
     draw();
+  }
+
+  function fitViewToBounds(bounds) {
+    if (!bounds) {
+      return;
+    }
+
+    const viewport = getViewportSize();
+    const padding = 40;
+    const boundsWidth = Math.max(1, bounds.maxX - bounds.minX);
+    const boundsHeight = Math.max(1, bounds.maxY - bounds.minY);
+    const fittedScale = Math.min(
+      1.2,
+      Math.max(
+        0.45,
+        Math.min(
+          (viewport.width - padding * 2) / boundsWidth,
+          (viewport.height - padding * 2) / boundsHeight
+        )
+      )
+    );
+
+    view.scale = fittedScale;
+    view.offsetX = viewport.width / 2 - (bounds.minX + boundsWidth / 2) * view.scale;
+    view.offsetY = viewport.height / 2 - (bounds.minY + boundsHeight / 2) * view.scale;
   }
 
   function applyScaleAtPoint(nextScale, clientX, clientY) {
@@ -456,6 +513,96 @@ export function createGraphCanvas(
     });
   }
 
+  function getNodeCenter(box) {
+    return {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+    };
+  }
+
+  function drawArrow(fromX, fromY, toX, toY, selected = false, animated = false) {
+    const start = worldToScreen(fromX, fromY);
+    const end = worldToScreen(toX, toY);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const angle = Math.atan2(end.y - start.y, end.x - start.x);
+    const headLength = 10;
+
+    ctx.save();
+    ctx.strokeStyle = selected ? "rgba(166, 123, 53, 0.68)" : "rgba(104, 114, 124, 0.38)";
+    ctx.lineWidth = selected ? 2 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath();
+    ctx.moveTo(end.x, end.y);
+    ctx.lineTo(
+      end.x - headLength * Math.cos(angle - Math.PI / 6),
+      end.y - headLength * Math.sin(angle - Math.PI / 6)
+    );
+    ctx.lineTo(
+      end.x - headLength * Math.cos(angle + Math.PI / 6),
+      end.y - headLength * Math.sin(angle + Math.PI / 6)
+    );
+    ctx.closePath();
+    ctx.fill();
+
+    if (animated) {
+      const progress = ((Date.now() / 900) % 1);
+      const markerX = start.x + dx * progress;
+      const markerY = start.y + dy * progress;
+      ctx.beginPath();
+      ctx.fillStyle = selected ? "rgba(166, 123, 53, 0.9)" : "rgba(166, 123, 53, 0.72)";
+      ctx.arc(markerX, markerY, Math.max(2.5, Math.min(4, distance / 80)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawLinks(graph, layout) {
+    graph.nodes.forEach((node) => {
+      const sourceBox = layout.get(node.id);
+      if (!sourceBox) {
+        return;
+      }
+
+      const sourceCenter = getNodeCenter(sourceBox);
+      getNodeLinks(node).forEach((link) => {
+        const targetBox = layout.get(Number(link?.entityId));
+        if (!targetBox) {
+          return;
+        }
+
+        const targetCenter = getNodeCenter(targetBox);
+        drawArrow(sourceCenter.x, sourceCenter.y, targetCenter.x, targetCenter.y, false, true);
+      });
+    });
+  }
+
+  function drawReferenceDraft(layout) {
+    if (!pointerState.referenceDraft) {
+      return;
+    }
+
+    const sourceBox = layout.get(pointerState.referenceDraft.sourceId);
+    if (!sourceBox) {
+      return;
+    }
+
+    const sourceCenter = getNodeCenter(sourceBox);
+    const targetBox = pointerState.referenceDraft.hoverTargetId
+      ? layout.get(pointerState.referenceDraft.hoverTargetId)
+      : null;
+    const targetPoint = targetBox
+      ? getNodeCenter(targetBox)
+      : screenToWorld(pointerState.referenceDraft.currentX, pointerState.referenceDraft.currentY);
+    drawArrow(sourceCenter.x, sourceCenter.y, targetPoint.x, targetPoint.y, true, true);
+  }
+
   function drawSelectionBox(box) {
     const x = Math.min(box.startX, box.currentX);
     const y = Math.min(box.startY, box.currentY);
@@ -564,8 +711,7 @@ export function createGraphCanvas(
   }
 
   function draw() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    const { width, height } = getViewportSize();
     ctx.clearRect(0, 0, width, height);
     drawGrid(width, height);
     hitRegions = [];
@@ -577,6 +723,13 @@ export function createGraphCanvas(
 
     const layout = layoutGraph(currentGraph);
     const bounds = getLayoutBounds(layout);
+
+    if (!hasInitializedView && initialViewMode === "fit-content" && bounds) {
+      fitViewToBounds(bounds);
+      hasInitializedView = true;
+    }
+
+    drawLinks(currentGraph, layout);
 
     currentGraph.nodes.forEach((node) => {
       const box = layout.get(node.id);
@@ -590,17 +743,37 @@ export function createGraphCanvas(
       drawSelectionBox(pointerState.selectionBox);
     }
 
-    drawMinimap(layout, bounds, width, height);
+    drawReferenceDraft(layout);
+
+    if (showMinimap) {
+      drawMinimap(layout, bounds, width, height);
+    }
   }
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = window.innerWidth * ratio;
-    canvas.height = window.innerHeight * ratio;
-    canvas.style.width = `${window.innerWidth}px`;
-    canvas.style.height = `${window.innerHeight}px`;
+    const { width, height } = getViewportSize();
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     draw();
+  }
+
+  function startAnimationLoop() {
+    if (animationFrame) {
+      return;
+    }
+
+    const tick = () => {
+      animationFrame = window.requestAnimationFrame(tick);
+      if (currentGraph?.nodes?.length) {
+        draw();
+      }
+    };
+
+    animationFrame = window.requestAnimationFrame(tick);
   }
 
   function startPinchGesture(touchA, touchB) {
@@ -637,7 +810,8 @@ export function createGraphCanvas(
       return;
     }
 
-    const minimapHit = getMinimapHitAt(event.clientX, event.clientY);
+    const point = toLocalPoint(event.clientX, event.clientY);
+    const minimapHit = showMinimap ? getMinimapHitAt(point.x, point.y) : null;
     if (minimapHit) {
       event.preventDefault();
       event.stopPropagation();
@@ -646,12 +820,12 @@ export function createGraphCanvas(
       draggingNodeId = null;
       view.draggingCanvas = false;
       if (event.button === 0 && minimapHit !== "card") {
-        startMinimapDrag(event.clientX, event.clientY);
+        startMinimapDrag(point.x, point.y);
       }
       return;
     }
 
-    const hit = getHitRegionAt(event.clientX, event.clientY);
+    const hit = getHitRegionAt(point.x, point.y);
 
     if (event.button === 2) {
       event.preventDefault();
@@ -659,15 +833,15 @@ export function createGraphCanvas(
 
       pointerState.contextMenuCandidate = {
         hitId: hit?.id ?? null,
-        startX: event.clientX,
-        startY: event.clientY,
+        startX: point.x,
+        startY: point.y,
         moved: false,
       };
 
       if (!hit) {
         view.draggingCanvas = false;
-        view.lastX = event.clientX;
-        view.lastY = event.clientY;
+        view.lastX = point.x;
+        view.lastY = point.y;
       }
 
       draggingNodeId = null;
@@ -675,15 +849,15 @@ export function createGraphCanvas(
     }
 
     if (event.shiftKey || !hit) {
-      beginSelectionBox(event.clientX, event.clientY);
+      beginSelectionBox(point.x, point.y);
       onBackgroundSelect();
       return;
     }
 
     registerNodeTap(hit.id);
     draggingNodeId = hit.id;
-    view.lastX = event.clientX;
-    view.lastY = event.clientY;
+    view.lastX = point.x;
+    view.lastY = point.y;
   });
 
   canvas.addEventListener("pointermove", (event) => {
@@ -691,36 +865,55 @@ export function createGraphCanvas(
       return;
     }
 
+    const point = toLocalPoint(event.clientX, event.clientY);
+
     if (minimapState.dragging) {
-      centerViewportFromMinimapPoint(event.clientX, event.clientY);
+      centerViewportFromMinimapPoint(point.x, point.y);
       return;
     }
 
     if (pointerState.contextMenuCandidate) {
-      const deltaX = event.clientX - pointerState.contextMenuCandidate.startX;
-      const deltaY = event.clientY - pointerState.contextMenuCandidate.startY;
+      const deltaX = point.x - pointerState.contextMenuCandidate.startX;
+      const deltaY = point.y - pointerState.contextMenuCandidate.startY;
       const movedFarEnough = isPastDragThreshold(deltaX, deltaY);
 
       if (movedFarEnough) {
         pointerState.contextMenuCandidate.moved = true;
         if (pointerState.contextMenuCandidate.hitId === null) {
           view.draggingCanvas = true;
+        } else {
+          pointerState.referenceDraft = {
+            sourceId: pointerState.contextMenuCandidate.hitId,
+            currentX: point.x,
+            currentY: point.y,
+            hoverTargetId: null,
+          };
         }
       }
     }
 
+    if (pointerState.referenceDraft) {
+      pointerState.referenceDraft.currentX = point.x;
+      pointerState.referenceDraft.currentY = point.y;
+      const hoverHit = getHitRegionAt(point.x, point.y);
+      pointerState.referenceDraft.hoverTargetId =
+        hoverHit && hoverHit.id !== pointerState.referenceDraft.sourceId ? hoverHit.id : null;
+      draw();
+      return;
+    }
+
     if (draggingNodeId !== null) {
-      const deltaX = (event.clientX - view.lastX) / view.scale;
-      const deltaY = (event.clientY - view.lastY) / view.scale;
-      view.lastX = event.clientX;
-      view.lastY = event.clientY;
+      const deltaX = (point.x - view.lastX) / view.scale;
+      const deltaY = (point.y - view.lastY) / view.scale;
+      view.lastX = point.x;
+      view.lastY = point.y;
       onNodeMove(draggingNodeId, deltaX, deltaY);
       return;
     }
 
     if (pointerState.selectionBox) {
-      pointerState.selectionBox.currentX = event.clientX;
-      pointerState.selectionBox.currentY = event.clientY;
+      pointerState.selectionBox.currentX = point.x;
+      pointerState.selectionBox.currentY = point.y;
       pointerState.selectionBox.moved =
         Math.abs(pointerState.selectionBox.currentX - pointerState.selectionBox.startX) > 6 ||
         Math.abs(pointerState.selectionBox.currentY - pointerState.selectionBox.startY) > 6;
@@ -732,9 +925,9 @@ export function createGraphCanvas(
       return;
     }
 
-    translateCanvas(event.clientX - view.lastX, event.clientY - view.lastY);
-    view.lastX = event.clientX;
-    view.lastY = event.clientY;
+    translateCanvas(point.x - view.lastX, point.y - view.lastY);
+    view.lastX = point.x;
+    view.lastY = point.y;
   });
 
   canvas.addEventListener("pointerup", (event) => {
@@ -753,6 +946,7 @@ export function createGraphCanvas(
 
     if (event.button === 2 && pointerState.contextMenuCandidate) {
       const { hitId, moved } = pointerState.contextMenuCandidate;
+      const draft = pointerState.referenceDraft;
       pointerState.contextMenuCandidate = null;
 
       if (!moved) {
@@ -761,8 +955,19 @@ export function createGraphCanvas(
         } else {
           onBackgroundContextMenu?.({ x: event.clientX, y: event.clientY });
         }
+      } else if (draft?.sourceId && draft.hoverTargetId) {
+        onNodeReferenceCreate?.(
+          draft.sourceId,
+          draft.hoverTargetId
+        );
+      } else if (draft?.sourceId) {
+        onNodeReferenceCreateToPoint?.(draft.sourceId, {
+          x: event.clientX,
+          y: event.clientY,
+        });
       }
 
+      pointerState.referenceDraft = null;
       draw();
     }
 
@@ -778,6 +983,7 @@ export function createGraphCanvas(
     stopMinimapDrag();
     pointerState.contextMenuCandidate = null;
     pointerState.selectionBox = null;
+    pointerState.referenceDraft = null;
     view.draggingCanvas = false;
     draggingNodeId = null;
   });
@@ -796,30 +1002,31 @@ export function createGraphCanvas(
     }
 
     const touch = event.touches[0];
-    const minimapHit = getMinimapHitAt(touch.clientX, touch.clientY);
+    const point = toLocalPoint(touch.clientX, touch.clientY);
+    const minimapHit = showMinimap ? getMinimapHitAt(point.x, point.y) : null;
     if (minimapHit && minimapHit !== "card") {
       clearTouchState();
       touchState.primary = {
         identifier: touch.identifier,
         hitId: null,
-        startX: touch.clientX,
-        startY: touch.clientY,
-        lastX: touch.clientX,
-        lastY: touch.clientY,
+        startX: point.x,
+        startY: point.y,
+        lastX: point.x,
+        lastY: point.y,
         mode: "minimap-drag",
       };
-      startMinimapDrag(touch.clientX, touch.clientY);
+      startMinimapDrag(point.x, point.y);
       return;
     }
 
-    const hit = getHitRegionAt(touch.clientX, touch.clientY);
+    const hit = getHitRegionAt(point.x, point.y);
     touchState.primary = {
       identifier: touch.identifier,
       hitId: hit?.id ?? null,
-      startX: touch.clientX,
-      startY: touch.clientY,
-      lastX: touch.clientX,
-      lastY: touch.clientY,
+      startX: point.x,
+      startY: point.y,
+      lastX: point.x,
+      lastY: point.y,
       mode: hit ? "node-pending" : "background-pending",
     };
 
@@ -831,8 +1038,8 @@ export function createGraphCanvas(
 
         touchState.primary.mode = "node-menu";
         onNodeContextMenu?.(hit.id, {
-          x: touchState.primary.lastX,
-          y: touchState.primary.lastY,
+          x: touch.clientX,
+          y: touch.clientY,
         });
       });
       return;
@@ -867,14 +1074,16 @@ export function createGraphCanvas(
       return;
     }
 
-    const totalDeltaX = touch.clientX - touchState.primary.startX;
-    const totalDeltaY = touch.clientY - touchState.primary.startY;
+    const point = toLocalPoint(touch.clientX, touch.clientY);
+
+    const totalDeltaX = point.x - touchState.primary.startX;
+    const totalDeltaY = point.y - touchState.primary.startY;
     const movedFarEnough = isPastDragThreshold(totalDeltaX, totalDeltaY);
 
     if (touchState.primary.mode === "minimap-drag") {
-      centerViewportFromMinimapPoint(touch.clientX, touch.clientY);
-      touchState.primary.lastX = touch.clientX;
-      touchState.primary.lastY = touch.clientY;
+      centerViewportFromMinimapPoint(point.x, point.y);
+      touchState.primary.lastX = point.x;
+      touchState.primary.lastY = point.y;
       return;
     }
 
@@ -896,22 +1105,22 @@ export function createGraphCanvas(
     }
 
     if (touchState.primary.mode === "node-drag") {
-      const deltaX = (touch.clientX - touchState.primary.lastX) / view.scale;
-      const deltaY = (touch.clientY - touchState.primary.lastY) / view.scale;
+      const deltaX = (point.x - touchState.primary.lastX) / view.scale;
+      const deltaY = (point.y - touchState.primary.lastY) / view.scale;
       onNodeMove?.(touchState.primary.hitId, deltaX, deltaY);
     } else if (touchState.primary.mode === "canvas-pan") {
-      translateCanvas(touch.clientX - touchState.primary.lastX, touch.clientY - touchState.primary.lastY);
+      translateCanvas(point.x - touchState.primary.lastX, point.y - touchState.primary.lastY);
     } else if (touchState.primary.mode === "selection" && pointerState.selectionBox) {
-      pointerState.selectionBox.currentX = touch.clientX;
-      pointerState.selectionBox.currentY = touch.clientY;
+      pointerState.selectionBox.currentX = point.x;
+      pointerState.selectionBox.currentY = point.y;
       pointerState.selectionBox.moved =
         Math.abs(pointerState.selectionBox.currentX - pointerState.selectionBox.startX) > 6 ||
         Math.abs(pointerState.selectionBox.currentY - pointerState.selectionBox.startY) > 6;
       draw();
     }
 
-    touchState.primary.lastX = touch.clientX;
-    touchState.primary.lastY = touch.clientY;
+    touchState.primary.lastX = point.x;
+    touchState.primary.lastY = point.y;
   }, { passive: false });
 
   canvas.addEventListener("touchend", (event) => {
@@ -974,6 +1183,8 @@ export function createGraphCanvas(
     { passive: false }
   );
 
+  startAnimationLoop();
+
   return {
     resize,
     render(graph, selectedId, selectedIds = []) {
@@ -983,11 +1194,19 @@ export function createGraphCanvas(
       draw();
     },
     getNodeScreenBox(nodeId) {
+      const rect = getCanvasRect();
       const region = hitRegions.find((item) => item.id === nodeId);
-      return region ? { ...region } : null;
+      return region
+        ? {
+            ...region,
+            x: region.x + rect.left,
+            y: region.y + rect.top,
+          }
+        : null;
     },
     projectScreenToWorld(x, y) {
-      return screenToWorld(x, y);
+      const point = toLocalPoint(x, y);
+      return screenToWorld(point.x, point.y);
     },
   };
 }

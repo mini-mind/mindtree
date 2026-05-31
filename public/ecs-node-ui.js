@@ -164,7 +164,7 @@ export function getEntityDialogConfig(entity) {
 }
 
 export function getEmptyEntityStatusMessage() {
-  return "先从插件背包中添加一个插件。";
+  return "当前节点还没有可处理输入的能力。";
 }
 
 export function getEntityPluginCount(entity) {

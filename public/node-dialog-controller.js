@@ -50,9 +50,6 @@ export function createNodeDialogController({
     elements.nodeDialogDirection.disabled = Boolean(config.composer?.disabled);
     elements.nodeDialogSubmit.textContent = config.composer?.actionLabel || "发送";
     elements.nodeDialogSubmit.disabled = Boolean(config.composer?.disabled);
-    elements.openPluginBackpack.textContent = getEntityPluginCount(node) > 0
-      ? `插件背包 (${getEntityPluginCount(node)})`
-      : "插件背包";
   }
 
   function getDialogStatusMessage(node) {

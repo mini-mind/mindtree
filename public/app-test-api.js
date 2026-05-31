@@ -1,6 +1,7 @@
 export function createTestApi({
   graphCanvas,
   enqueueNodeMessage,
+  connectNodes,
 }) {
   return {
     getNodeScreenBox(id) {
@@ -8,6 +9,9 @@ export function createTestApi({
     },
     async enqueueNodeMessage(targetNodeId, payload) {
       return enqueueNodeMessage(targetNodeId, payload);
+    },
+    async connectNodes(sourceNodeId, targetNodeId) {
+      return connectNodes(sourceNodeId, targetNodeId);
     },
   };
 }

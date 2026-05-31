@@ -13,7 +13,6 @@ export function bindAppEvents({
   selection,
   graphCanvas,
   nodeDialogController,
-  pluginBackpack,
   createNodeController,
   getNodeOffsetAtScreenPosition,
   openConfig,
@@ -81,28 +80,12 @@ export function bindAppEvents({
     nodeDialogController.submit();
   });
 
-  elements.openPluginBackpack.addEventListener("click", () => {
-    pluginBackpack.open();
-  });
-
   elements.confirmCreateNode.addEventListener("click", () => {
     createNodeController.confirm();
   });
 
   elements.createNodeDialog.addEventListener("close", () => {
     createNodeController.clear();
-  });
-
-  elements.attachSelectedPlugin.addEventListener("click", () => {
-    pluginBackpack.attachSelectedPlugin();
-  });
-
-  elements.removeSelectedPlugin.addEventListener("click", () => {
-    pluginBackpack.removeSelectedPluginMount();
-  });
-
-  elements.closePluginBackpackAction.addEventListener("click", () => {
-    elements.pluginBackpackDialog.close();
   });
 
   window.addEventListener("resize", () => {

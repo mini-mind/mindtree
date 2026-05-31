@@ -12,7 +12,7 @@ import {
   setNodeUiMessageLabels,
   setSummary,
 } from "./ecs-entity-state.js";
-import { ensureEntityRuntimeComponent, getEntityRuntimeComponent } from "./ecs-world.js";
+import { emitEntityEvent, ensureEntityRuntimeComponent, getEntityRuntimeComponent } from "./ecs-world.js";
 
 function getMountRuntime(entity, mountPath) {
   return ensureEntityRuntimeComponent(entity, mountPath, () => ({}));
@@ -216,18 +216,22 @@ registerEcsPlugin({
     setDialogStatus(entity, `输入一条任务后加入任务板。当前待办 ${openCount} 项。`);
   },
   onEvent({ entity, event }) {
-    if (event.type !== "dialog.submit") {
+    if (event.type !== "dialog.submit" && event.type !== "task.add") {
       return;
     }
 
-    const text = String(event.payload?.input || "").trim();
+    const text = String(
+      event.type === "task.add" ? event.payload?.text || "" : event.payload?.input || ""
+    ).trim();
     if (!text) {
-      setDialogStatus(entity, "先输入一条任务内容。");
-      event.meta.result = {
-        ok: false,
-        isError: true,
-        statusMessage: "先输入一条任务内容。",
-      };
+      if (event.type === "dialog.submit") {
+        setDialogStatus(entity, "先输入一条任务内容。");
+        event.meta.result = {
+          ok: false,
+          isError: true,
+          statusMessage: "先输入一条任务内容。",
+        };
+      }
       return;
     }
 
@@ -241,14 +245,16 @@ registerEcsPlugin({
     ];
     setMessages(entity, [
       ...getMessages(entity),
-      { role: "user", agent: "", content: text },
+      ...(event.type === "dialog.submit" ? [{ role: "user", agent: "", content: text }] : []),
       { role: "agent", agent: "task_board", content: `已加入任务板：${text}` },
     ]);
     setDialogStatus(entity, "任务已加入任务板。");
-    event.meta.result = {
-      ok: true,
-      statusMessage: "任务已加入任务板。",
-    };
+    if (event.type === "dialog.submit") {
+      event.meta.result = {
+        ok: true,
+        statusMessage: "任务已加入任务板。",
+      };
+    }
   },
 });
 
@@ -347,6 +353,19 @@ registerEcsPlugin({
       if (result.summary) {
         setSummary(entity, String(result.summary).trim());
       }
+
+      getEntityLinks(entity)
+        .filter((item) => item?.type === "agent/task_board" && Number.isFinite(Number(item?.entityId)))
+        .forEach((item) => {
+          emitEntityEvent(world, Number(item.entityId), {
+            type: "task.add",
+            payload: {
+              text: result.summary || result.message || prompt,
+              sourceEntityId: entity.id,
+            },
+            meta: {},
+          });
+        });
       setDialogStatus(entity, "Agent 已完成本轮响应。");
       event.meta.result = {
         ok: true,

@@ -1,11 +1,12 @@
 import { saveConfig as persistConfig, saveGraph } from "./config-store.js";
 import {
   addGraphNode,
-  createNode,
+  createPresetNode,
   deleteNodeFromGraph,
   getMaxGraphId,
   getNodeById,
   getNodePosition,
+  upsertNodeLink,
 } from "./graph-model.js";
 import { buildEntityContext } from "./ecs-agent-context.js";
 import { createWorld, stepWorld } from "./ecs-world.js";
@@ -33,6 +34,7 @@ export function createAppRuntime({ initialGraph, initialConfig, initialDefaultCo
         context,
         prompt: promptText,
         config: llmConfig,
+        systemPrompt: typeof node.data?.systemPrompt === "string" ? node.data.systemPrompt : "",
       }),
     });
 
@@ -73,8 +75,8 @@ export function createAppRuntime({ initialGraph, initialConfig, initialDefaultCo
     getNodeById(nodeIdValue) {
       return getNodeById(graph, nodeIdValue);
     },
-    appendNode(offsetX = 0, offsetY = 0) {
-      const node = createNode(nodeId++, offsetX, offsetY);
+    appendPresetNode(presetKey, offsetX = 0, offsetY = 0) {
+      const node = createPresetNode(nodeId++, presetKey, offsetX, offsetY);
       addGraphNode(graph, node);
       rebuildWorld();
       saveGraph(graph);
@@ -126,6 +128,15 @@ export function createAppRuntime({ initialGraph, initialConfig, initialDefaultCo
       node.data.y = position.y + deltaY;
       saveGraph(graph);
       return node;
+    },
+    connectNodes(sourceId, targetId, link) {
+      const changed = upsertNodeLink(graph, sourceId, targetId, link);
+      if (!changed) {
+        return false;
+      }
+      rebuildWorld();
+      saveGraph(graph);
+      return true;
     },
     async refreshNodeAfterMutation(node, refreshNodeDialog) {
       rebuildWorld();

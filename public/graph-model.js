@@ -1,6 +1,7 @@
 import { assertGraphDocument } from "./graph-validation.js";
 import { createDefaultNodeUi } from "./ecs-entity-state.js";
 import { normalizePluginMount } from "./ecs-plugin-tree.js";
+import { buildNodePresetState } from "./node-presets.js";
 
 function createDefaultNodeData() {
   return {
@@ -18,17 +19,19 @@ function createEmptyNodeRuntime() {
   };
 }
 
-export function createNode(id, x = 0, y = 0) {
+export function createPresetNode(id, presetKey, x = 0, y = 0) {
+  const preset = buildNodePresetState(presetKey);
   return {
     id,
     data: {
       ...createDefaultNodeData(),
+      ...(preset.data || {}),
       x,
       y,
     },
     runtime: createEmptyNodeRuntime(),
     ui: createDefaultNodeUi(),
-    mounts: [],
+    mounts: Array.isArray(preset.mounts) ? preset.mounts : [],
   };
 }
 
@@ -54,7 +57,7 @@ function normalizeNode(node) {
 
 function createInitialGraph() {
   return {
-    nodes: [createNode(1)],
+    nodes: [createPresetNode(1, "build")],
   };
 }
 
@@ -90,6 +93,37 @@ export function getNodeById(graph, id) {
 
 export function addGraphNode(graph, node) {
   graph.nodes.push(node);
+}
+
+export function upsertNodeLink(graph, sourceId, targetId, link = {}) {
+  if (!Number.isFinite(sourceId) || !Number.isFinite(targetId) || sourceId === targetId) {
+    return false;
+  }
+
+  const source = getNodeById(graph, sourceId);
+  const target = getNodeById(graph, targetId);
+  if (!source || !target) {
+    return false;
+  }
+
+  if (!Array.isArray(source.data.links)) {
+    source.data.links = [];
+  }
+
+  const nextLink = {
+    entityId: targetId,
+    type: typeof link.type === "string" && link.type ? link.type : "reference",
+    label: typeof link.label === "string" ? link.label : "",
+    config: link.config && typeof link.config === "object" ? { ...link.config } : {},
+  };
+  const existingIndex = source.data.links.findIndex((item) => Number(item?.entityId) === targetId);
+  if (existingIndex >= 0) {
+    source.data.links[existingIndex] = nextLink;
+  } else {
+    source.data.links.push(nextLink);
+  }
+
+  return true;
 }
 
 export function deleteNodeFromGraph(graph, id) {
